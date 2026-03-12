@@ -1,0 +1,9 @@
+{
+  "name": "Recycled Sound Wireframes",
+  "id": "recycled-sound-wireframes",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "editorType": ["figma"]
+}
