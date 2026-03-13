@@ -622,6 +622,19 @@ function consentCard(parent, x, y, ww, icon, title, desc, detail, on) {
   return y + h + 8;
 }
 
+function langChips(parent, x, y, full) {
+  chip(parent, x, y, "English", C.blueLight, C.blue);
+  chip(parent, x + 66, y, "\u062F\u0631\u06CC", C.chip, C.muted);
+  chip(parent, x + 102, y, "\u0639\u0631\u0628\u06CC", C.chip, C.muted);
+  if (full) {
+    chip(parent, x + 140, y, "Tamil", C.chip, C.muted);
+    chip(parent, x + 184, y, "More...", C.chip, C.muted);
+  } else {
+    chip(parent, x + 140, y, "More...", C.chip, C.muted);
+  }
+  return y + 28;
+}
+
 function screen5A(page, x, y) {
   var p = phone(page, x, y, "5A. Data Consent");
   var cy = navBar(p, 44, "Your Privacy", true, "");
@@ -631,13 +644,7 @@ function screen5A(page, x, y) {
   T(p, "Title", 0, cy + 62, "Your Data, Your Choice", 15, "Extra Bold", C.text, 280, "CENTER");
   T(p, "Sub", 20, cy + 82, "We need your permission to collect some\ninformation. You can change these anytime.", 11, "Regular", C.muted, 240, "CENTER");
   cy += 112;
-  // Language chips
-  chip(p, 16, cy, "English", C.blueLight, C.blue);
-  chip(p, 82, cy, "\u062F\u0631\u06CC", C.chip, C.muted);
-  chip(p, 118, cy, "\u0639\u0631\u0628\u06CC", C.chip, C.muted);
-  chip(p, 156, cy, "Tamil", C.chip, C.muted);
-  chip(p, 200, cy, "More...", C.chip, C.muted);
-  cy += 28;
+  cy = langChips(p, 16, cy, true);
   // Consent cards
   cy = consentCard(p, 16, cy, 248, "\uD83C\uDFE5", "Health Information", "Hearing loss, audiograms, device needs", "Required to match you with the right hearing aid. Seen by: audiologists & admin only.", true);
   cy = consentCard(p, 16, cy, 248, "\uD83D\uDC64", "Personal Details", "Country, language, visa status", "Helps us prioritise people with greatest need. Seen by: admin only.", true);
@@ -651,39 +658,36 @@ function screen5B(page, x, y) {
   var p = phone(page, x, y, "5B. Privacy Summary");
   var cy = navBar(p, 44, "Privacy Policy", true, "");
   cy += 4;
-  // Language chips
-  chip(p, 16, cy, "English", C.blueLight, C.blue);
-  chip(p, 82, cy, "\u062F\u0631\u06CC", C.chip, C.muted);
-  chip(p, 118, cy, "\u0639\u0631\u0628\u06CC", C.chip, C.muted);
-  chip(p, 156, cy, "More...", C.chip, C.muted);
-  cy += 28;
+  cy = langChips(p, 16, cy, false);
   T(p, "Heading", 16, cy, "Plain-Language Summary", 14, "Bold", C.text, 248);
   T(p, "Updated", 16, cy + 18, "Last updated: March 2026", 10, "Regular", C.muted, 248);
-  cy += 36;
+  cy += 34;
   // Section: What we collect
-  R(p, "S1 Bg", 16, cy, 248, 68, C.surface, 10);
-  T(p, "S1 Hdr", 28, cy + 8, "\uD83D\uDCCB What we collect", 11, "Bold", C.text, 220);
-  T(p, "S1 Body", 28, cy + 24, "\u2022 Hearing loss info & audiograms\n\u2022 Name, contact, location\n\u2022 Country, language, visa status\n\u2022 Device photos from scanner", 10, "Regular", C.muted, 220);
-  cy += 76;
+  R(p, "S1 Bg", 16, cy, 248, 64, C.surface, 10);
+  T(p, "S1 Hdr", 28, cy + 6, "\uD83D\uDCCB What we collect", 11, "Bold", C.text, 220);
+  T(p, "S1 Body", 28, cy + 20, "\u2022 Hearing loss info & audiograms\n\u2022 Name, contact, location\n\u2022 Country, language, visa status\n\u2022 Device photos from scanner", 10, "Regular", C.muted, 220);
+  cy += 70;
   // Section: Who sees it
-  R(p, "S2 Bg", 16, cy, 248, 64, C.surface, 10);
-  T(p, "S2 Hdr", 28, cy + 8, "\uD83D\uDC41 Who sees your data", 11, "Bold", C.text, 220);
-  T(p, "S2 Body", 28, cy + 24, "\u2022 Health data \u2192 audiologists + admin\n\u2022 Personal details \u2192 admin only\n\u2022 Donors see: device name & status\n\u2022 We never sell your data", 10, "Regular", C.muted, 220);
-  cy += 72;
+  R(p, "S2 Bg", 16, cy, 248, 60, C.surface, 10);
+  T(p, "S2 Hdr", 28, cy + 6, "\uD83D\uDC41 Who sees your data", 11, "Bold", C.text, 220);
+  T(p, "S2 Body", 28, cy + 20, "\u2022 Health data \u2192 audiologists + admin\n\u2022 Personal details \u2192 admin only\n\u2022 Donors see: device name & status\n\u2022 We never sell your data", 10, "Regular", C.muted, 220);
+  cy += 66;
   // Section: Where stored
-  R(p, "S3 Bg", 16, cy, 248, 52, C.surface, 10);
-  T(p, "S3 Hdr", 28, cy + 8, "\uD83D\uDD12 Where it's stored", 11, "Bold", C.text, 220);
-  T(p, "S3 Body", 28, cy + 24, "\u2022 Encrypted & stored in Australia\n\u2022 Access controlled by role", 10, "Regular", C.muted, 220);
-  cy += 60;
+  R(p, "S3 Bg", 16, cy, 248, 46, C.surface, 10);
+  T(p, "S3 Hdr", 28, cy + 6, "\uD83D\uDD12 Where it's stored", 11, "Bold", C.text, 220);
+  T(p, "S3 Body", 28, cy + 20, "\u2022 Encrypted & stored in Australia\n\u2022 Access controlled by role", 10, "Regular", C.muted, 220);
+  cy += 52;
   // Section: Your rights
-  R(p, "S4 Bg", 16, cy, 248, 64, C.surface, 10);
-  T(p, "S4 Hdr", 28, cy + 8, "\u2696\uFE0F Your rights", 11, "Bold", C.text, 220);
-  T(p, "S4 Body", 28, cy + 24, "\u2022 See, correct, or delete your data\n\u2022 Withdraw consent anytime\n\u2022 Complain to OAIC if unhappy", 10, "Regular", C.muted, 220);
-  cy += 72;
+  R(p, "S4 Bg", 16, cy, 248, 56, C.surface, 10);
+  T(p, "S4 Hdr", 28, cy + 6, "\u2696\uFE0F Your rights", 11, "Bold", C.text, 220);
+  T(p, "S4 Body", 28, cy + 20, "\u2022 See, correct, or delete your data\n\u2022 Withdraw consent anytime\n\u2022 Complain to OAIC if unhappy", 10, "Regular", C.muted, 220);
+  cy += 62;
   // Legal basis
-  R(p, "Legal Bg", 16, cy, 248, 52, C.amberBg, 10, C.amberBorder, 1);
-  T(p, "Legal Hdr", 28, cy + 8, "\uD83D\uDCDC Legal basis", 11, "Bold", C.amberText, 220);
-  T(p, "Legal Body", 28, cy + 24, "\u2022 Australian Privacy Act 1988 (APPs)\n\u2022 Health Records Act 2001 (VIC)", 10, "Regular", C.amberText, 220);
+  R(p, "Legal Bg", 16, cy, 248, 46, C.amberBg, 10, C.amberBorder, 1);
+  T(p, "Legal Hdr", 28, cy + 6, "\uD83D\uDCDC Legal basis", 11, "Bold", C.amberText, 220);
+  T(p, "Legal Body", 28, cy + 20, "\u2022 Australian Privacy Act 1988 (APPs)\n\u2022 Health Records Act 2001 (VIC)", 10, "Regular", C.amberText, 220);
+  cy += 52;
+  T(p, "PDF Link", 0, cy, "Download full policy (PDF)", 10, "Regular", C.primary, 280, "CENTER");
 }
 
 function screen5C(page, x, y) {

@@ -18,6 +18,11 @@
       --success: #10b981;
       --warning: #f59e0b;
       --error: #ef4444;
+      --legal-bg: #fffbeb;
+      --legal-border: #fcd34d;
+      --legal-text: #92400e;
+      --info-bg: #dbeafe;
+      --info-text: #1e40af;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -299,8 +304,8 @@
     }
 
     .chip-green { background: #d1fae5; color: #065f46; }
-    .chip-amber { background: #fef3c7; color: #92400e; }
-    .chip-blue { background: #dbeafe; color: #1e40af; }
+    .chip-amber { background: #fef3c7; color: var(--legal-text); }
+    .chip-blue { background: var(--info-bg); color: var(--info-text); }
     .chip-red { background: #fee2e2; color: #991b1b; }
 
     /* Confidence bar */
@@ -658,7 +663,7 @@
       padding: 8px 12px;
       margin: 8px 16px;
       font-size: 11px;
-      color: #92400e;
+      color: var(--legal-text);
       line-height: 1.4;
     }
 
@@ -969,12 +974,12 @@
             </div>
           </div>
 
-          <div class="card" style="background: #fffbeb; border-color: #fcd34d;">
+          <div class="card" style="background: var(--legal-bg); border-color: #fcd34d;">
             <div style="display: flex; align-items: flex-start; gap: 8px;">
               <span style="font-size: 16px;">&#x1f50d;</span>
               <div>
-                <div style="font-size: 12px; font-weight: 700; color: #92400e;">Needs Audiologist Review</div>
-                <div style="font-size: 11px; color: #92400e; margin-top: 2px;">
+                <div style="font-size: 12px; font-weight: 700; color: var(--legal-text);">Needs Audiologist Review</div>
+                <div style="font-size: 11px; color: var(--legal-text); margin-top: 2px;">
                   Tech level, programming interface (likely Noahlink Wireless), and gain range require professional assessment.
                 </div>
               </div>
@@ -1025,7 +1030,7 @@
           </div>
 
           <div class="list-item">
-            <div class="list-avatar" style="background: #dbeafe;">&#x1f3a7;</div>
+            <div class="list-avatar" style="background: var(--info-bg);">&#x1f3a7;</div>
             <div class="list-info">
               <div class="list-title">Phonak Audeo P90-R</div>
               <div class="list-sub">Donor: PL &middot; Scanned 2 days ago</div>
@@ -1673,7 +1678,7 @@
           </div>
 
           <div style="text-align: center; padding: 24px 20px 16px;">
-            <div style="width: 56px; height: 56px; border-radius: 50%; background: #dbeafe; display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 12px;">&#x23F3;</div>
+            <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--info-bg); display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 12px;">&#x23F3;</div>
             <div style="font-size: 16px; font-weight: 700;">Application Received</div>
             <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.5;">
               Our team is reviewing your application. We'll be in touch when we find a suitable device.
@@ -1919,9 +1924,9 @@
             </div>
 
             <!-- Legal references -->
-            <div style="background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px; padding: 10px; margin-bottom: 8px;">
-              <div style="font-size: 11px; font-weight: 700; color: #92400e; margin-bottom: 4px;">&#x1F4DC; Legal basis</div>
-              <div style="font-size: 10px; color: #92400e; line-height: 1.5;">
+            <div style="background: var(--legal-bg); border: 1px solid var(--legal-border); border-radius: 10px; padding: 10px; margin-bottom: 8px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--legal-text); margin-bottom: 4px;">&#x1F4DC; Legal basis</div>
+              <div style="font-size: 10px; color: var(--legal-text); line-height: 1.5;">
                 &bull; Australian Privacy Act 1988 (APPs)<br>
                 &bull; Health Records Act 2001 (VIC)<br>
                 &bull; Notifiable Data Breaches scheme
@@ -2022,9 +2027,9 @@
 
           <!-- Contact -->
           <div style="padding: 8px 16px;">
-            <div style="background: #dbeafe; border-radius: 10px; padding: 10px; text-align: center;">
-              <div style="font-size: 11px; font-weight: 600; color: #1e40af;">&#x1F4E7; Privacy questions?</div>
-              <div style="font-size: 10px; color: #1e40af; margin-top: 2px;">privacy@recycledsound.org</div>
+            <div style="background: var(--info-bg); border-radius: 10px; padding: 10px; text-align: center;">
+              <div style="font-size: 11px; font-weight: 600; color: var(--info-text);">&#x1F4E7; Privacy questions?</div>
+              <div style="font-size: 10px; color: var(--info-text); margin-top: 2px;">privacy@recycledsound.org</div>
             </div>
           </div>
 
