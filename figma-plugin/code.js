@@ -1,1808 +1,812 @@
-// Recycled Sound — Figma Wireframe Generator v2
-// Creates a proper design system with components, then builds screens from instances.
+// Recycled Sound — Figma Wireframe Generator v3
+// Design system components + reliable absolute-positioned wireframes
 
-// ─── Colour Palette ───────────────────────────────────────────
+// ─── Colours ──────────────────────────────────────────────────
 const C = {
   primary:      { r: 0.165, g: 0.490, b: 0.373 },
   primaryLight: { r: 0.910, g: 0.961, b: 0.933 },
   accent:       { r: 0.902, g: 0.494, b: 0.133 },
   text:         { r: 0.102, g: 0.102, b: 0.102 },
-  textMuted:    { r: 0.420, g: 0.443, b: 0.498 },
+  muted:        { r: 0.420, g: 0.443, b: 0.498 },
   border:       { r: 0.820, g: 0.835, b: 0.855 },
   surface:      { r: 0.976, g: 0.980, b: 0.984 },
   white:        { r: 1, g: 1, b: 1 },
   black:        { r: 0.102, g: 0.102, b: 0.102 },
-  success:      { r: 0.063, g: 0.725, b: 0.506 },
-  successLight: { r: 0.820, g: 0.980, b: 0.898 },
-  successDark:  { r: 0.024, g: 0.373, b: 0.275 },
-  warning:      { r: 0.961, g: 0.620, b: 0.043 },
-  warningLight: { r: 0.996, g: 0.953, b: 0.780 },
-  error:        { r: 0.937, g: 0.267, b: 0.267 },
-  errorLight:   { r: 0.996, g: 0.886, b: 0.886 },
-  errorDark:    { r: 0.600, g: 0.106, b: 0.106 },
+  ok:           { r: 0.063, g: 0.725, b: 0.506 },
+  okLight:      { r: 0.820, g: 0.980, b: 0.898 },
+  okDark:       { r: 0.024, g: 0.373, b: 0.275 },
+  warn:         { r: 0.961, g: 0.620, b: 0.043 },
+  warnLight:    { r: 0.996, g: 0.953, b: 0.780 },
+  err:          { r: 0.937, g: 0.267, b: 0.267 },
+  errLight:     { r: 0.996, g: 0.886, b: 0.886 },
+  errDark:      { r: 0.600, g: 0.106, b: 0.106 },
   blueLight:    { r: 0.859, g: 0.914, b: 0.976 },
   blue:         { r: 0.118, g: 0.251, b: 0.686 },
-  camera:       { r: 0.102, g: 0.102, b: 0.102 },
   amberBg:      { r: 1.000, g: 0.984, b: 0.929 },
   amberBorder:  { r: 0.988, g: 0.827, b: 0.302 },
   amberText:    { r: 0.573, g: 0.251, b: 0.055 },
-  chipDefault:  { r: 0.953, g: 0.957, b: 0.965 },
-  transparent:  null,
+  chip:         { r: 0.953, g: 0.957, b: 0.965 },
+  dark:         { r: 0.15, g: 0.15, b: 0.15 },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────
-function rgb(c) { return c ? { r: c.r, g: c.g, b: c.b } : { r: 1, g: 1, b: 1 }; }
-function solid(c) { return c ? [{ type: 'SOLID', color: rgb(c) }] : []; }
-function noFill() { return []; }
+function s(c) { return c ? [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b } }] : []; }
+function noF() { return []; }
+
+let _eb = null;
+function w(weight) {
+  if (weight === "Extra Bold") {
+    if (_eb === null) {
+      try { const t = figma.createText(); t.fontName = { family: "Inter", style: "Extra Bold" }; t.remove(); _eb = true; } catch (e) { _eb = false; }
+    }
+    return _eb ? "Extra Bold" : "Bold";
+  }
+  return weight || "Regular";
+}
 
 async function loadFonts() {
-  const styles = ["Regular", "Medium", "Semi Bold", "Bold", "Extra Bold"];
-  for (const s of styles) {
-    await figma.loadFontAsync({ family: "Inter", style: s });
+  for (const st of ["Regular", "Medium", "Semi Bold", "Bold"]) {
+    await figma.loadFontAsync({ family: "Inter", style: st });
   }
+  try { await figma.loadFontAsync({ family: "Inter", style: "Extra Bold" }); } catch (e) { /* ok */ }
 }
 
-// ─── Paint & Text Styles ──────────────────────────────────────
-const paintStyles = {};
-const textStyles = {};
-
-function createPaintStyle(name, color) {
-  const s = figma.createPaintStyle();
-  s.name = name;
-  s.paints = solid(color);
-  paintStyles[name] = s;
-  return s;
-}
-
-function createTextStyle(name, size, weight, lineHeight) {
-  const s = figma.createTextStyle();
-  s.name = name;
-  s.fontName = { family: "Inter", style: weight };
-  s.fontSize = size;
-  if (lineHeight) s.lineHeight = { value: lineHeight, unit: "PIXELS" };
-  textStyles[name] = s;
-  return s;
-}
-
-function applyPaintStyle(node, styleName, prop) {
-  if (paintStyles[styleName]) {
-    if (prop === 'fills') node.fillStyleId = paintStyles[styleName].id;
-    else if (prop === 'strokes') node.strokeStyleId = paintStyles[styleName].id;
-  }
-}
-
-// ─── Auto-layout Frame Builder ────────────────────────────────
-function alFrame(name, opts = {}) {
-  const f = figma.createFrame();
-  f.name = name;
-  f.layoutMode = opts.direction || "VERTICAL";
-  f.primaryAxisSizingMode = opts.hug ? "AUTO" : "FIXED";
-  f.counterAxisSizingMode = opts.hugCross ? "AUTO" : "FIXED";
-  if (opts.w) f.resize(opts.w, opts.h || 10);
-  f.itemSpacing = opts.gap != null ? opts.gap : 8;
-  f.paddingTop = opts.pt != null ? opts.pt : (opts.p != null ? opts.p : 0);
-  f.paddingBottom = opts.pb != null ? opts.pb : (opts.p != null ? opts.p : 0);
-  f.paddingLeft = opts.pl != null ? opts.pl : (opts.p != null ? opts.p : 0);
-  f.paddingRight = opts.pr != null ? opts.pr : (opts.p != null ? opts.p : 0);
-  f.fills = opts.fill ? solid(opts.fill) : noFill();
-  if (opts.radius) f.cornerRadius = opts.radius;
-  if (opts.stroke) { f.strokes = solid(opts.stroke); f.strokeWeight = opts.strokeW || 1; }
-  if (opts.clip) f.clipsContent = true;
-  if (opts.align) f.counterAxisAlignItems = opts.align;
-  if (opts.mainAlign) f.primaryAxisAlignItems = opts.mainAlign;
-  return f;
-}
-
-function textNode(content, opts = {}) {
-  const t = figma.createText();
-  t.fontName = { family: "Inter", style: opts.weight || "Regular" };
-  t.characters = content;
-  t.fontSize = opts.size || 12;
-  t.fills = solid(opts.color || C.text);
-  if (opts.align) t.textAlignHorizontal = opts.align;
-  t.textAutoResize = "WIDTH_AND_HEIGHT";
-  if (opts.w) {
-    t.resize(opts.w, t.height);
-    t.textAutoResize = "HEIGHT";
-  }
-  if (opts.style && textStyles[opts.style]) {
-    t.textStyleId = textStyles[opts.style].id;
-  }
-  t.layoutAlign = opts.stretch ? "STRETCH" : "INHERIT";
-  return t;
-}
-
-function spacer(h) {
+// ─── Drawing helpers ──────────────────────────────────────────
+function R(parent, name, x, y, ww, h, fill, radius, stroke, strokeW) {
   const r = figma.createRectangle();
-  r.name = "Spacer";
-  r.resize(1, h);
-  r.fills = noFill();
+  r.name = name || "Rect";
+  r.x = x; r.y = y; r.resize(ww, h);
+  r.fills = fill ? s(fill) : noF();
+  if (radius != null) r.cornerRadius = radius;
+  if (stroke) { r.strokes = s(stroke); r.strokeWeight = strokeW || 1; }
+  parent.appendChild(r);
   return r;
 }
 
-function divider(w) {
-  const d = figma.createRectangle();
-  d.name = "Divider";
-  d.resize(w || 248, 1);
-  d.fills = solid(C.border);
-  d.layoutAlign = "STRETCH";
-  return d;
+function T(parent, name, x, y, text, size, weight, color, ww, align) {
+  const t = figma.createText();
+  t.name = name || "Text";
+  t.x = x; t.y = y;
+  t.fontName = { family: "Inter", style: w(weight || "Regular") };
+  t.fontSize = size || 12;
+  t.fills = s(color || C.text);
+  t.characters = text;
+  t.textAutoResize = "WIDTH_AND_HEIGHT";
+  if (ww) { t.resize(ww, t.height); t.textAutoResize = "HEIGHT"; }
+  if (align) t.textAlignHorizontal = align;
+  parent.appendChild(t);
+  return t;
 }
 
-// ─── Component Registry ───────────────────────────────────────
-const components = {};
-
-// ─── Component: Chip ──────────────────────────────────────────
-function createChipComponent(name, bgColor, textColor, selected) {
-  const comp = figma.createComponent();
-  comp.name = name;
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.paddingTop = 4; comp.paddingBottom = 4;
-  comp.paddingLeft = 10; comp.paddingRight = 10;
-  comp.cornerRadius = 6;
-  comp.fills = solid(bgColor);
-  comp.itemSpacing = 0;
-
-  const label = textNode("Label", { size: 10, weight: "Semi Bold", color: textColor });
-  comp.appendChild(label);
-
-  return comp;
+function G(parent, name, x, y) {
+  const f = figma.createFrame();
+  f.name = name;
+  f.x = x; f.y = y;
+  f.resize(1, 1);
+  f.fills = noF();
+  f.clipsContent = false;
+  parent.appendChild(f);
+  return f;
 }
 
-function chipInstance(comp, label) {
-  const inst = comp.createInstance();
-  const textChild = inst.findOne(n => n.type === "TEXT");
-  if (textChild) textChild.characters = label;
-  return inst;
+// ─── Reusable UI patterns ─────────────────────────────────────
+function chip(parent, x, y, label, bg, fg) {
+  const cw = Math.max(label.length * 6 + 18, 36);
+  const g = G(parent, "Chip: " + label, x, y);
+  g.resize(cw, 22);
+  R(g, "Bg", 0, 0, cw, 22, bg || C.chip, 6);
+  T(g, "Label", 8, 4, label, 10, "Semi Bold", fg || C.muted);
+  return cw;
 }
 
-// ─── Component: Button ────────────────────────────────────────
-function createButtonComponent(name, bgColor, textColor, strokeColor) {
-  const comp = figma.createComponent();
-  comp.name = name;
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.primaryAxisAlignItems = "CENTER";
-  comp.counterAxisAlignItems = "CENTER";
-  comp.paddingTop = 12; comp.paddingBottom = 12;
-  comp.paddingLeft = 20; comp.paddingRight = 20;
-  comp.cornerRadius = 12;
-  comp.fills = solid(bgColor);
-  comp.itemSpacing = 8;
-  if (strokeColor) { comp.strokes = solid(strokeColor); comp.strokeWeight = 1.5; }
-
-  const label = textNode("Button Label", { size: 14, weight: "Semi Bold", color: textColor });
-  comp.appendChild(label);
-
-  return comp;
+function btn(parent, x, y, ww, h, label, style) {
+  const bg = style === "primary" ? C.primary : style === "outline" ? C.white : C.surface;
+  const fg = style === "primary" ? C.white : style === "outline" ? C.primary : C.text;
+  const st = style === "outline" ? C.primary : style === "ghost" ? C.border : null;
+  const g = G(parent, "Button: " + label, x, y);
+  g.resize(ww, h);
+  R(g, "Bg", 0, 0, ww, h, bg, 12, st, st ? 1.5 : 0);
+  T(g, "Label", 0, (h - 14) / 2, label, 14, "Semi Bold", fg, ww, "CENTER");
+  return g;
 }
 
-function buttonInstance(comp, label, stretch) {
-  const inst = comp.createInstance();
-  const textChild = inst.findOne(n => n.type === "TEXT");
-  if (textChild) textChild.characters = label;
-  if (stretch) inst.layoutAlign = "STRETCH";
-  return inst;
+function navBar(parent, y, title, back, action) {
+  const g = G(parent, "Nav Bar", 0, y);
+  g.resize(280, 44);
+  R(g, "Bg", 0, 0, 280, 44, C.white);
+  R(g, "Border", 0, 43, 280, 1, C.border);
+  if (back) T(g, "Back", 16, 12, "\u2039", 20, "Regular", C.primary);
+  T(g, "Title", back ? 32 : 16, 14, title, 15, "Semi Bold", C.text);
+  if (action) T(g, "Action", 220, 16, action, 12, "Semi Bold", C.primary);
+  return y + 44;
 }
 
-// ─── Component: Input Field ───────────────────────────────────
-function createInputFieldComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Input Field";
-  comp.layoutMode = "VERTICAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(248, 10);
-  comp.fills = noFill();
-  comp.itemSpacing = 4;
-
-  const label = textNode("LABEL", { size: 10, weight: "Semi Bold", color: C.textMuted, w: 248 });
-  label.layoutAlign = "STRETCH";
-  comp.appendChild(label);
-
-  const field = alFrame("Field", { direction: "HORIZONTAL", hug: false, w: 248, h: 36,
-    fill: C.surface, radius: 8, stroke: C.border, strokeW: 1.5, p: 0, pl: 12, pr: 12, gap: 4,
-    align: "CENTER" });
-  field.layoutAlign = "STRETCH";
-  field.primaryAxisSizingMode = "FIXED";
-  field.counterAxisSizingMode = "FIXED";
-  field.resize(248, 36);
-  const value = textNode("Value", { size: 13, color: C.text });
-  field.appendChild(value);
-  comp.appendChild(field);
-
-  return comp;
-}
-
-function inputInstance(comp, label, value, filled) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  if (texts[0]) texts[0].characters = label.toUpperCase();
-  if (texts[1]) texts[1].characters = value;
-  if (filled) {
-    const field = inst.findOne(n => n.name === "Field");
-    if (field) {
-      field.fills = solid(C.primaryLight);
-      field.strokes = solid(C.primary);
-    }
+function tabBar(parent, active) {
+  const g = G(parent, "Tab Bar", 0, 496);
+  g.resize(280, 64);
+  R(g, "Bg", 0, 0, 280, 64, C.white);
+  R(g, "Border", 0, 0, 280, 1, C.border);
+  var tabs = ["Home", "Scan", "Devices", "Profile"];
+  for (var i = 0; i < 4; i++) {
+    var tx = 16 + i * 64;
+    var isA = i === active;
+    if (isA) R(g, "Active Bg", tx + 7, 8, 22, 22, C.primary, 4);
+    else R(g, "Icon", tx + 7, 8, 22, 22, null, 4, C.muted, 1.5);
+    T(g, tabs[i], tx, 34, tabs[i], 9, "Regular", isA ? C.primary : C.muted, 36, "CENTER");
   }
-  inst.layoutAlign = "STRETCH";
-  return inst;
 }
 
-// ─── Component: Spec Row ──────────────────────────────────────
-function createSpecRowComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Spec Row";
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.resize(220, 10);
-  comp.fills = noFill();
-  comp.itemSpacing = 8;
-  comp.primaryAxisAlignItems = "SPACE_BETWEEN";
-
-  const label = textNode("Label", { size: 11, color: C.textMuted });
-  comp.appendChild(label);
-
-  const value = textNode("Value", { size: 12, weight: "Semi Bold", color: C.text });
-  comp.appendChild(value);
-
-  return comp;
+function specRow(parent, x, y, ww, label, value, checkColor) {
+  T(parent, label, x, y, label, 11, "Regular", C.muted);
+  var prefix = checkColor ? "\u2713 " : "";
+  T(parent, "Val:" + label, x + ww * 0.5, y, prefix + value, 12, "Semi Bold", checkColor || C.text);
+  return y + 20;
 }
 
-function specRowInstance(comp, label, value, checkColor) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  if (texts[0]) texts[0].characters = label;
-  if (texts[1]) {
-    texts[1].characters = checkColor ? "\u2713 " + value : value;
-    if (checkColor) texts[1].fills = solid(checkColor);
+function inputField(parent, x, y, ww, label, value, filled) {
+  T(parent, "Label:" + label, x, y, label.toUpperCase(), 10, "Semi Bold", C.muted, ww);
+  R(parent, "Field:" + label, x, y + 16, ww, 36, filled ? C.primaryLight : C.surface, 8, filled ? C.primary : C.border, 1.5);
+  T(parent, "Value:" + label, x + 12, y + 26, value, 13, "Regular", C.text);
+  return y + 58;
+}
+
+function progressDots(parent, y, active, total) {
+  var sw = 32, gap = 4;
+  var startX = (280 - (total * sw + (total - 1) * gap)) / 2;
+  for (var i = 0; i < total; i++) {
+    var col = i < active ? C.ok : i === active ? C.primary : C.border;
+    R(parent, "Step " + (i + 1), startX + i * (sw + gap), y, sw, 4, col, 2);
   }
-  inst.layoutAlign = "STRETCH";
-  return inst;
+  return y + 16;
 }
 
-// ─── Component: Nav Bar ───────────────────────────────────────
-function createNavBarComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Nav Bar";
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(280, 44);
-  comp.fills = solid(C.white);
-  comp.itemSpacing = 8;
-  comp.paddingLeft = 16; comp.paddingRight = 16;
-  comp.counterAxisAlignItems = "CENTER";
-  comp.strokes = [{ type: 'SOLID', color: rgb(C.border), opacity: 1 }];
-  comp.strokeWeight = 1;
-  comp.strokeAlign = "INSIDE";
-  comp.strokeBottomWeight = 1;
-
-  const back = textNode("\u2039", { size: 20, color: C.primary });
-  comp.appendChild(back);
-
-  const title = textNode("Title", { size: 15, weight: "Semi Bold", color: C.text });
-  title.layoutGrow = 1;
-  comp.appendChild(title);
-
-  const action = textNode("Action", { size: 12, weight: "Semi Bold", color: C.primary });
-  comp.appendChild(action);
-
-  return comp;
+function sectionHdr(parent, x, y, text) {
+  T(parent, "Section: " + text, x, y, text, 13, "Bold", C.text, 248);
+  return y + 20;
 }
 
-function navBarInstance(comp, title, hasBack, actionText) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  if (texts[0] && !hasBack) texts[0].characters = "";
-  if (texts[1]) texts[1].characters = title;
-  if (texts[2]) texts[2].characters = actionText || "";
-  inst.layoutAlign = "STRETCH";
-  return inst;
+function annotation(parent, x, y, ww, text) {
+  var h = Math.ceil(text.length / 40) * 14 + 24;
+  var r = R(parent, "Annotation Bg", x, y, ww, h, C.amberBg, 8, C.amberBorder, 1);
+  r.dashPattern = [4, 4];
+  T(parent, "Note Label", x + 8, y + 6, "NOTE", 9, "Bold", C.amberText);
+  T(parent, "Note Text", x + 8, y + 20, text, 10, "Regular", C.amberText, ww - 16);
+  return y + h + 8;
 }
 
-// ─── Component: Tab Bar ───────────────────────────────────────
-function createTabBarComponent(activeIndex) {
-  const comp = figma.createComponent();
-  comp.name = `Tab Bar / Active=${activeIndex}`;
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(280, 56);
-  comp.fills = solid(C.white);
-  comp.paddingTop = 6; comp.paddingBottom = 10;
-  comp.paddingLeft = 12; comp.paddingRight = 12;
-  comp.primaryAxisAlignItems = "SPACE_BETWEEN";
-  comp.strokes = [{ type: 'SOLID', color: rgb(C.border) }];
-  comp.strokeWeight = 1;
-  comp.strokeAlign = "INSIDE";
-
-  const tabs = [
-    { label: "Home" },
-    { label: "Scan" },
-    { label: "Devices" },
-    { label: "Profile" },
-  ];
-
-  tabs.forEach((tab, i) => {
-    const isActive = i === activeIndex;
-    const tabFrame = alFrame(`Tab ${tab.label}`, {
-      direction: "VERTICAL", hug: true, hugCross: true, gap: 2, align: "CENTER"
-    });
-
-    const icon = alFrame("Icon", {
-      direction: "HORIZONTAL", w: 24, h: 24,
-      fill: isActive ? C.primary : C.transparent,
-      radius: 4, align: "CENTER", mainAlign: "CENTER"
-    });
-    icon.primaryAxisSizingMode = "FIXED";
-    icon.counterAxisSizingMode = "FIXED";
-    icon.resize(24, 24);
-    if (!isActive) { icon.strokes = solid(C.textMuted); icon.strokeWeight = 1.5; }
-    tabFrame.appendChild(icon);
-
-    const label = textNode(tab.label, {
-      size: 9, weight: "Regular", color: isActive ? C.primary : C.textMuted, align: "CENTER"
-    });
-    tabFrame.appendChild(label);
-    comp.appendChild(tabFrame);
-  });
-
-  return comp;
+function listItem(parent, y, title, sub, status, sBg, sFg) {
+  var g = G(parent, "Item: " + title, 0, y);
+  g.resize(280, 52);
+  R(g, "Bg", 0, 0, 280, 52, C.white);
+  R(g, "Divider", 0, 51, 280, 1, C.surface);
+  R(g, "Avatar", 16, 8, 36, 36, C.blueLight, 10);
+  T(g, "Emoji", 22, 16, "\uD83C\uDFA7", 16, "Regular", C.text);
+  T(g, "Title", 62, 12, title, 13, "Semi Bold", C.text, 130);
+  T(g, "Sub", 62, 28, sub, 11, "Regular", C.muted, 130);
+  chip(g, 204, 16, status, sBg, sFg);
+  return y + 52;
 }
 
-// ─── Component: Status Bar ────────────────────────────────────
-function createStatusBarComponent(dark) {
-  const comp = figma.createComponent();
-  comp.name = dark ? "Status Bar / Dark" : "Status Bar / Light";
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(280, 44);
-  comp.fills = noFill();
-  comp.paddingLeft = 24; comp.paddingRight = 24;
-  comp.paddingBottom = 4;
-  comp.primaryAxisAlignItems = "SPACE_BETWEEN";
-  comp.counterAxisAlignItems = "MAX";
-
-  const time = textNode("9:41", { size: 11, weight: "Semi Bold", color: dark ? C.white : C.text });
-  comp.appendChild(time);
-
-  return comp;
+function confidenceRow(parent, x, y, ww, label, status, sBg, sFg, barW, barC) {
+  T(parent, label, x, y, label, 11, "Regular", C.muted);
+  chip(parent, x + ww - 60, y - 2, status, sBg, sFg);
+  R(parent, "BarBg", x, y + 18, ww, 4, C.border, 2);
+  R(parent, "BarFill", x, y + 18, barW, 4, barC, 2);
+  return y + 30;
 }
 
-// ─── Component: Notch ─────────────────────────────────────────
-function createNotchComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Notch";
-  comp.resize(100, 24);
-  comp.fills = solid(C.black);
-  comp.bottomLeftRadius = 16;
-  comp.bottomRightRadius = 16;
-  comp.topLeftRadius = 0;
-  comp.topRightRadius = 0;
-  return comp;
+function toggleRow(parent, x, y, ww, label, sub, on) {
+  T(parent, "Toggle:" + label, x, y, label, 12, "Semi Bold", C.text, ww - 60);
+  if (sub) T(parent, "ToggleSub", x, y + 16, sub, 10, "Regular", C.muted, ww - 60);
+  R(parent, "Track", x + ww - 40, y, 40, 22, on ? C.primary : C.border, 11);
+  R(parent, "Knob", on ? x + ww - 20 : x + ww - 40 + 2, y + 2, 18, 18, C.white, 9);
+  return y + (sub ? 36 : 28);
 }
 
-// ─── Component: Card ──────────────────────────────────────────
-function createCardComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Card";
-  comp.layoutMode = "VERTICAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(248, 10);
-  comp.fills = solid(C.white);
-  comp.cornerRadius = 12;
-  comp.strokes = solid(C.border);
-  comp.strokeWeight = 1;
-  comp.paddingTop = 12; comp.paddingBottom = 12;
-  comp.paddingLeft = 12; comp.paddingRight = 12;
-  comp.itemSpacing = 8;
-
-  return comp;
-}
-
-// ─── Component: Progress Steps ────────────────────────────────
-function createProgressStepsComponent(active, total) {
-  const comp = figma.createComponent();
-  comp.name = `Progress Steps / ${active + 1} of ${total}`;
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.itemSpacing = 4;
-  comp.paddingTop = 8; comp.paddingBottom = 8;
-
-  for (let i = 0; i < total; i++) {
-    const dot = figma.createRectangle();
-    dot.name = i < active ? "Done" : i === active ? "Active" : "Pending";
-    dot.resize(32, 4);
-    dot.cornerRadius = 2;
-    dot.fills = solid(i < active ? C.success : i === active ? C.primary : C.border);
-    comp.appendChild(dot);
-  }
-
-  return comp;
-}
-
-// ─── Component: List Item ─────────────────────────────────────
-function createListItemComponent() {
-  const comp = figma.createComponent();
-  comp.name = "List Item";
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.resize(280, 10);
-  comp.fills = solid(C.white);
-  comp.paddingTop = 10; comp.paddingBottom = 10;
-  comp.paddingLeft = 16; comp.paddingRight = 16;
-  comp.itemSpacing = 10;
-  comp.counterAxisAlignItems = "CENTER";
-
-  // Avatar
-  const avatar = alFrame("Avatar", { w: 36, h: 36, fill: C.blueLight, radius: 10,
-    align: "CENTER", mainAlign: "CENTER" });
-  avatar.primaryAxisSizingMode = "FIXED";
-  avatar.counterAxisSizingMode = "FIXED";
-  avatar.resize(36, 36);
-  const emoji = textNode("\uD83C\uDFA7", { size: 16 });
-  avatar.appendChild(emoji);
-  comp.appendChild(avatar);
-
-  // Info
-  const info = alFrame("Info", { hug: true, hugCross: true, gap: 2 });
-  info.layoutGrow = 1;
-  const title = textNode("Device Name", { size: 13, weight: "Semi Bold" });
-  info.appendChild(title);
-  const sub = textNode("Subtitle text", { size: 11, color: C.textMuted });
-  info.appendChild(sub);
-  comp.appendChild(info);
-
-  // Status chip placeholder
-  const statusChip = alFrame("Status", { direction: "HORIZONTAL", hug: true, hugCross: true,
-    fill: C.warningLight, radius: 6, gap: 0, pt: 4, pb: 4, pl: 8, pr: 8 });
-  const statusLabel = textNode("Status", { size: 10, weight: "Semi Bold", color: C.amberText });
-  statusChip.appendChild(statusLabel);
-  comp.appendChild(statusChip);
-
-  return comp;
-}
-
-function listItemInstance(comp, title, subtitle, status, statusBg, statusColor) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  // texts: emoji, title, subtitle, status
-  if (texts[1]) texts[1].characters = title;
-  if (texts[2]) texts[2].characters = subtitle;
-  if (texts[3]) texts[3].characters = status;
-
-  const statusFrame = inst.findOne(n => n.name === "Status");
-  if (statusFrame && statusBg) statusFrame.fills = solid(statusBg);
-  if (texts[3] && statusColor) texts[3].fills = solid(statusColor);
-
-  inst.layoutAlign = "STRETCH";
-  return inst;
-}
-
-// ─── Component: Annotation ────────────────────────────────────
-function createAnnotationComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Annotation";
-  comp.layoutMode = "VERTICAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(248, 10);
-  comp.fills = solid(C.amberBg);
-  comp.cornerRadius = 8;
-  comp.strokes = [{ type: 'SOLID', color: rgb(C.amberBorder), dashPattern: [4, 4] }];
-  comp.strokeWeight = 1;
-  comp.paddingTop = 8; comp.paddingBottom = 8;
-  comp.paddingLeft = 12; comp.paddingRight = 12;
-  comp.itemSpacing = 2;
-
-  const noteLabel = textNode("NOTE", { size: 9, weight: "Bold", color: C.amberText });
-  comp.appendChild(noteLabel);
-  const noteText = textNode("Annotation content goes here.", { size: 10, color: C.amberText, w: 224 });
-  noteText.layoutAlign = "STRETCH";
-  comp.appendChild(noteText);
-
-  return comp;
-}
-
-function annotationInstance(comp, text) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  if (texts[1]) texts[1].characters = text;
-  inst.layoutAlign = "STRETCH";
-  return inst;
-}
-
-// ─── Component: Toggle Row ────────────────────────────────────
-function createToggleComponent(on) {
-  const comp = figma.createComponent();
-  comp.name = on ? "Toggle / On" : "Toggle / Off";
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.resize(248, 10);
-  comp.fills = noFill();
-  comp.itemSpacing = 8;
-  comp.counterAxisAlignItems = "CENTER";
-  comp.primaryAxisAlignItems = "SPACE_BETWEEN";
-
-  const labelFrame = alFrame("Label", { hug: true, hugCross: true, gap: 2 });
-  const mainLabel = textNode("Toggle label", { size: 12, weight: "Semi Bold" });
-  labelFrame.appendChild(mainLabel);
-  const subLabel = textNode("Description text", { size: 10, color: C.textMuted });
-  labelFrame.appendChild(subLabel);
-  comp.appendChild(labelFrame);
-
-  // Track
-  const track = figma.createRectangle();
-  track.name = "Track";
-  track.resize(40, 22);
-  track.cornerRadius = 11;
-  track.fills = solid(on ? C.primary : C.border);
-  comp.appendChild(track);
-
-  return comp;
-}
-
-function toggleInstance(comp, label, sublabel) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  if (texts[0]) texts[0].characters = label;
-  if (texts[1]) texts[1].characters = sublabel || "";
-  inst.layoutAlign = "STRETCH";
-  return inst;
-}
-
-// ─── Component: Confidence Row ────────────────────────────────
-function createConfidenceRowComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Confidence Row";
-  comp.layoutMode = "VERTICAL";
-  comp.primaryAxisSizingMode = "AUTO";
-  comp.counterAxisSizingMode = "FIXED";
-  comp.resize(248, 10);
-  comp.fills = noFill();
-  comp.itemSpacing = 4;
-
-  // Header row
-  const header = alFrame("Header", { direction: "HORIZONTAL", hug: true, w: 248, gap: 8 });
-  header.primaryAxisAlignItems = "SPACE_BETWEEN";
-  header.layoutAlign = "STRETCH";
-  const label = textNode("Attribute name", { size: 11, color: C.textMuted });
-  label.layoutGrow = 1;
-  header.appendChild(label);
-
-  const statusChip = alFrame("StatusChip", { direction: "HORIZONTAL", hug: true, hugCross: true,
-    fill: C.successLight, radius: 6, pt: 2, pb: 2, pl: 6, pr: 6 });
-  const statusText = textNode("Done", { size: 10, weight: "Semi Bold", color: C.successDark });
-  statusChip.appendChild(statusText);
-  header.appendChild(statusChip);
-  comp.appendChild(header);
-
-  // Bar background
-  const barBg = figma.createRectangle();
-  barBg.name = "Bar BG";
-  barBg.resize(248, 4);
-  barBg.cornerRadius = 2;
-  barBg.fills = solid(C.border);
-  barBg.layoutAlign = "STRETCH";
-  comp.appendChild(barBg);
-
-  // Bar fill
-  const barFill = figma.createRectangle();
-  barFill.name = "Bar Fill";
-  barFill.resize(235, 4);
-  barFill.cornerRadius = 2;
-  barFill.fills = solid(C.success);
-  barFill.layoutAlign = "INHERIT";
-  comp.appendChild(barFill);
-
-  return comp;
-}
-
-function confidenceInstance(comp, label, status, statusBg, statusColor, fillWidth, fillColor) {
-  const inst = comp.createInstance();
-  const texts = inst.findAll(n => n.type === "TEXT");
-  if (texts[0]) texts[0].characters = label;
-  if (texts[1]) texts[1].characters = status;
-
-  const chip = inst.findOne(n => n.name === "StatusChip");
-  if (chip) chip.fills = solid(statusBg);
-  if (texts[1]) texts[1].fills = solid(statusColor);
-
-  const fill = inst.findOne(n => n.name === "Bar Fill");
-  if (fill) { fill.resize(fillWidth, 4); fill.fills = solid(fillColor); }
-
-  inst.layoutAlign = "STRETCH";
-  return inst;
-}
-
-// ─── Component: Section Header ────────────────────────────────
-function createSectionHeaderComponent() {
-  const comp = figma.createComponent();
-  comp.name = "Section Header";
-  comp.layoutMode = "HORIZONTAL";
-  comp.primaryAxisSizingMode = "FIXED";
-  comp.counterAxisSizingMode = "AUTO";
-  comp.resize(248, 10);
-  comp.fills = noFill();
-  comp.paddingTop = 4; comp.paddingBottom = 4;
-
-  const t = textNode("Section Title", { size: 13, weight: "Bold" });
-  comp.appendChild(t);
-
-  return comp;
-}
-
-function sectionHeaderInstance(comp, text) {
-  const inst = comp.createInstance();
-  const t = inst.findOne(n => n.type === "TEXT");
-  if (t) t.characters = text;
-  inst.layoutAlign = "STRETCH";
-  return inst;
-}
-
-// ─── Component: Chip Row ──────────────────────────────────────
-function chipRow(chips) {
-  const row = alFrame("Chip Row", { direction: "HORIZONTAL", hug: true, hugCross: true, gap: 6 });
-  chips.forEach(c => row.appendChild(c));
-  row.layoutAlign = "STRETCH";
-  row.layoutWrap = "WRAP";
-  return row;
-}
-
-// ─── Phone Frame Builder ──────────────────────────────────────
-function createPhoneFrame(name) {
-  const phone = alFrame(name, {
-    w: 280, h: 560, fill: C.white, radius: 32, clip: true,
-    stroke: C.black, strokeW: 3, gap: 0
-  });
-  phone.primaryAxisSizingMode = "FIXED";
-  phone.counterAxisSizingMode = "FIXED";
-
-  // Notch (absolute positioned)
-  if (components.notch) {
-    const notch = components.notch.createInstance();
-    notch.layoutPositioning = "ABSOLUTE";
-    notch.x = 90; notch.y = 0;
-    phone.appendChild(notch);
-  }
-
-  return phone;
-}
-
-// ─── Build Screens ────────────────────────────────────────────
-
-function buildScreen1A(page, x, y) {
-  const phone = createPhoneFrame("1A. Home");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
+// ─── Phone Frame ──────────────────────────────────────────────
+function phone(page, x, y, name) {
+  var f = figma.createFrame();
+  f.name = name;
+  f.x = x; f.y = y;
+  f.resize(280, 560);
+  f.fills = s(C.white);
+  f.cornerRadius = 32;
+  f.clipsContent = true;
+  f.strokes = s(C.black);
+  f.strokeWeight = 3;
+  page.appendChild(f);
+  // Notch
+  var n = R(f, "Notch", 90, 0, 100, 24, C.black, 0);
+  n.topLeftRadius = 0; n.topRightRadius = 0;
+  n.bottomLeftRadius = 16; n.bottomRightRadius = 16;
   // Status bar
-  phone.appendChild(components.statusBar.createInstance());
+  T(f, "Time", 20, 28, "9:41", 11, "Semi Bold", C.text);
+  return f;
+}
 
+// ─── Screen Builders ──────────────────────────────────────────
+
+function screen1A(page, x, y) {
+  var p = phone(page, x, y, "1A. Home");
   // Hero
-  const hero = alFrame("Hero", { w: 280, gap: 6, align: "CENTER", pt: 16, pb: 8 });
-  hero.layoutAlign = "STRETCH";
-
-  const iconBg = alFrame("Icon", { w: 72, h: 72, fill: C.primaryLight, radius: 20, align: "CENTER", mainAlign: "CENTER" });
-  iconBg.primaryAxisSizingMode = "FIXED"; iconBg.counterAxisSizingMode = "FIXED";
-  iconBg.resize(72, 72);
-  iconBg.appendChild(textNode("\uD83C\uDFB5", { size: 32 }));
-  hero.appendChild(iconBg);
-
-  hero.appendChild(textNode("Recycled Sound", { size: 18, weight: "Extra Bold", align: "CENTER", w: 248 }));
-  hero.appendChild(textNode("Give hearing aids a second life.\nScan, donate, match, connect.", { size: 12, color: C.textMuted, align: "CENTER", w: 248 }));
-  phone.appendChild(hero);
-
+  R(p, "Icon Bg", 104, 60, 72, 72, C.primaryLight, 20);
+  T(p, "Icon", 122, 78, "\uD83C\uDFB5", 32, "Regular", C.text);
+  T(p, "Title", 0, 144, "Recycled Sound", 18, "Extra Bold", C.text, 280, "CENTER");
+  T(p, "Tagline", 30, 168, "Give hearing aids a second life.\nScan, donate, match, connect.", 12, "Regular", C.muted, 220, "CENTER");
   // Buttons
-  const btns = alFrame("Actions", { w: 280, gap: 10, pl: 16, pr: 16, pt: 4, pb: 4 });
-  btns.layoutAlign = "STRETCH";
-  btns.appendChild(buttonInstance(components.btnPrimary, "\uD83D\uDCF7  Scan a Hearing Aid", true));
-  btns.appendChild(buttonInstance(components.btnOutline, "\uD83C\uDF81  Donate a Device", true));
-  btns.appendChild(buttonInstance(components.btnGhost, "\uD83D\uDCCB  Browse Available Aids", true));
-  phone.appendChild(btns);
-
-  phone.appendChild(divider());
-
+  btn(p, 16, 206, 248, 48, "\uD83D\uDCF7  Scan a Hearing Aid", "primary");
+  btn(p, 16, 262, 248, 42, "\uD83C\uDF81  Donate a Device", "outline");
+  btn(p, 16, 312, 248, 42, "\uD83D\uDCCB  Browse Available Aids", "ghost");
+  // Divider
+  R(p, "Divider", 16, 366, 248, 1, C.border);
   // Stats
-  const stats = alFrame("Stats Section", { w: 280, gap: 8, pl: 16, pr: 16, pt: 4 });
-  stats.layoutAlign = "STRETCH";
-  stats.appendChild(textNode("Quick Stats", { size: 13, weight: "Bold" }));
-
-  const statRow = alFrame("Stat Cards", { direction: "HORIZONTAL", w: 248, gap: 8 });
-  statRow.layoutAlign = "STRETCH";
-
-  const statNames = [
-    { n: "20", l: "Devices\non Register", c: C.primary },
-    { n: "12", l: "Awaiting\nQA", c: C.accent },
-    { n: "5", l: "Matched &\nFitted", c: C.success },
-  ];
-  statNames.forEach(s => {
-    const card = alFrame("Stat", { hug: true, hugCross: false, fill: C.white, radius: 12,
-      stroke: C.border, p: 8, gap: 2, align: "CENTER" });
-    card.layoutGrow = 1;
-    card.appendChild(textNode(s.n, { size: 22, weight: "Extra Bold", color: s.c, align: "CENTER", w: 60 }));
-    card.appendChild(textNode(s.l, { size: 10, color: C.textMuted, align: "CENTER", w: 60 }));
-    statRow.appendChild(card);
-  });
-  stats.appendChild(statRow);
-  phone.appendChild(stats);
-
-  // Tab bar (absolute at bottom)
-  const tabBar = components.tabBar0.createInstance();
-  tabBar.layoutPositioning = "ABSOLUTE";
-  tabBar.x = 0; tabBar.y = 504;
-  phone.appendChild(tabBar);
-
-  return phone;
+  T(p, "Stats Title", 16, 378, "Quick Stats", 13, "Bold", C.text);
+  // Stat cards
+  R(p, "Card1", 16, 398, 76, 56, C.white, 12, C.border, 1);
+  T(p, "N1", 16, 406, "20", 22, "Extra Bold", C.primary, 76, "CENTER");
+  T(p, "L1", 16, 432, "Devices", 10, "Regular", C.muted, 76, "CENTER");
+  R(p, "Card2", 100, 398, 76, 56, C.white, 12, C.border, 1);
+  T(p, "N2", 100, 406, "12", 22, "Extra Bold", C.accent, 76, "CENTER");
+  T(p, "L2", 100, 432, "Awaiting QA", 10, "Regular", C.muted, 76, "CENTER");
+  R(p, "Card3", 184, 398, 80, 56, C.white, 12, C.border, 1);
+  T(p, "N3", 184, 406, "5", 22, "Extra Bold", C.ok, 80, "CENTER");
+  T(p, "L3", 184, 432, "Matched", 10, "Regular", C.muted, 80, "CENTER");
+  tabBar(p, 0);
 }
 
-function buildScreen1B(page, x, y) {
-  const phone = createPhoneFrame("1B. Camera Scanner");
-  phone.x = x; phone.y = y;
-  phone.fills = solid(C.camera);
-  page.appendChild(phone);
-
-  // Status bar (dark)
-  phone.appendChild(components.statusBarDark.createInstance());
-
+function screen1B(page, x, y) {
+  var p = phone(page, x, y, "1B. Camera Scanner");
+  // Dark bg
+  R(p, "Camera Bg", 0, 0, 280, 560, C.dark, 0);
+  // Re-notch
+  var n = R(p, "Notch", 90, 0, 100, 24, C.black, 0);
+  n.topLeftRadius = 0; n.topRightRadius = 0; n.bottomLeftRadius = 16; n.bottomRightRadius = 16;
+  T(p, "Time", 20, 28, "9:41", 11, "Semi Bold", C.white);
   // Top bar
-  const topBar = alFrame("Top Bar", { direction: "HORIZONTAL", w: 280, gap: 8, pl: 20, pr: 20,
-    pt: 0, pb: 8, mainAlign: "SPACE_BETWEEN", align: "CENTER" });
-  topBar.layoutAlign = "STRETCH";
-  topBar.appendChild(textNode("\u2715", { size: 14, color: C.white }));
-  topBar.appendChild(textNode("Scan Hearing Aid", { size: 12, weight: "Semi Bold", color: C.white }));
-  topBar.appendChild(textNode("\u26A1", { size: 14, color: C.white }));
-  phone.appendChild(topBar);
-
-  // Spacer to push scan frame down
-  phone.appendChild(spacer(24));
-
-  // Scan frame area
-  const scanArea = alFrame("Scan Area", { w: 280, gap: 12, align: "CENTER" });
-  scanArea.layoutAlign = "STRETCH";
-  scanArea.layoutGrow = 1;
-
-  // Frame with corners
-  const frame = alFrame("Viewfinder Frame", { w: 180, h: 180, radius: 16, stroke: C.white, strokeW: 1.5,
-    align: "CENTER", mainAlign: "CENTER" });
-  frame.primaryAxisSizingMode = "FIXED"; frame.counterAxisSizingMode = "FIXED";
-  frame.resize(180, 180);
-  frame.fills = [{ type: 'SOLID', color: rgb(C.white), opacity: 0.05 }];
-
-  // HA placeholder text
-  frame.appendChild(textNode("\uD83E\uDDBB", { size: 48, color: { r: 0.4, g: 0.4, b: 0.4 } }));
-  scanArea.appendChild(frame);
-
-  scanArea.appendChild(textNode("Position hearing aid within the frame", { size: 12,
-    color: { r: 0.7, g: 0.7, b: 0.7 }, align: "CENTER", w: 248 }));
-  phone.appendChild(scanArea);
-
-  // Camera controls
-  const controls = alFrame("Camera Controls", { w: 280, gap: 12, align: "CENTER", pb: 12, pt: 8 });
-  controls.layoutAlign = "STRETCH";
-
-  const btnRow = alFrame("Buttons", { direction: "HORIZONTAL", hug: true, hugCross: true, gap: 20,
-    align: "CENTER" });
-
-  // Gallery
-  const galleryBtn = alFrame("Gallery", { w: 40, h: 40, fill: { r: 0.2, g: 0.2, b: 0.2 }, radius: 20,
-    align: "CENTER", mainAlign: "CENTER" });
-  galleryBtn.primaryAxisSizingMode = "FIXED"; galleryBtn.counterAxisSizingMode = "FIXED";
-  galleryBtn.resize(40, 40);
-  btnRow.appendChild(galleryBtn);
-
-  // Shutter
-  const shutter = alFrame("Shutter", { w: 64, h: 64, fill: C.white, radius: 32,
-    align: "CENTER", mainAlign: "CENTER" });
-  shutter.primaryAxisSizingMode = "FIXED"; shutter.counterAxisSizingMode = "FIXED";
-  shutter.resize(64, 64);
-  const inner = figma.createEllipse();
-  inner.resize(52, 52);
-  inner.fills = noFill();
-  inner.strokes = solid(C.primary);
-  inner.strokeWeight = 3;
-  shutter.appendChild(inner);
-  btnRow.appendChild(shutter);
-
-  // Flip
-  const flipBtn = alFrame("Flip", { w: 40, h: 40, fill: { r: 0.2, g: 0.2, b: 0.2 }, radius: 20,
-    align: "CENTER", mainAlign: "CENTER" });
-  flipBtn.primaryAxisSizingMode = "FIXED"; flipBtn.counterAxisSizingMode = "FIXED";
-  flipBtn.resize(40, 40);
-  btnRow.appendChild(flipBtn);
-
-  controls.appendChild(btnRow);
-
+  T(p, "Close", 20, 52, "\u2715", 14, "Regular", C.white);
+  T(p, "Title", 90, 52, "Scan Hearing Aid", 12, "Semi Bold", C.white, 100, "CENTER");
+  T(p, "Flash", 244, 52, "\u26A1", 14, "Regular", C.white);
+  // Scan frame
+  R(p, "Frame", 50, 120, 180, 180, null, 16, { r: 1, g: 1, b: 1 }, 1.5);
+  // Corners
+  R(p, "TL-H", 48, 118, 28, 3, C.primary); R(p, "TL-V", 48, 118, 3, 28, C.primary);
+  R(p, "TR-H", 204, 118, 28, 3, C.primary); R(p, "TR-V", 229, 118, 3, 28, C.primary);
+  R(p, "BL-H", 48, 297, 28, 3, C.primary); R(p, "BL-V", 48, 272, 3, 28, C.primary);
+  R(p, "BR-H", 204, 297, 28, 3, C.primary); R(p, "BR-V", 229, 272, 3, 28, C.primary);
+  // Placeholder
+  T(p, "HA", 112, 185, "\uD83E\uDDBB", 40, "Regular", { r: 0.4, g: 0.4, b: 0.4 });
+  // Instruction
+  T(p, "Hint", 30, 320, "Position hearing aid within the frame", 12, "Regular", { r: 0.7, g: 0.7, b: 0.7 }, 220, "CENTER");
+  // Shutter area
+  R(p, "Gallery", 48, 440, 40, 40, { r: 0.25, g: 0.25, b: 0.25 }, 20);
+  R(p, "Shutter Outer", 108, 430, 64, 64, C.white, 32);
+  R(p, "Shutter Inner", 112, 434, 56, 56, null, 28, C.primary, 3);
+  R(p, "Flip", 192, 440, 40, 40, { r: 0.25, g: 0.25, b: 0.25 }, 20);
   // Mode labels
-  const modeRow = alFrame("Modes", { direction: "HORIZONTAL", hug: true, hugCross: true, gap: 20 });
-  modeRow.appendChild(textNode("Gallery", { size: 11, color: { r: 0.5, g: 0.5, b: 0.5 } }));
-  modeRow.appendChild(textNode("Photo", { size: 11, weight: "Semi Bold", color: C.white }));
-  modeRow.appendChild(textNode("Multi", { size: 11, color: { r: 0.5, g: 0.5, b: 0.5 } }));
-  controls.appendChild(modeRow);
-
-  phone.appendChild(controls);
-
-  return phone;
+  T(p, "M1", 52, 510, "Gallery", 11, "Regular", { r: 0.5, g: 0.5, b: 0.5 }, 56, "CENTER");
+  T(p, "M2", 112, 510, "Photo", 11, "Semi Bold", C.white, 56, "CENTER");
+  T(p, "M3", 172, 510, "Multi", 11, "Regular", { r: 0.5, g: 0.5, b: 0.5 }, 56, "CENTER");
 }
 
-function buildScreen1C(page, x, y) {
-  const phone = createPhoneFrame("1C. AI Analysing");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Analysing...", true, ""));
-
-  // Photo area
-  const photo = alFrame("Photo", { w: 248, h: 90, fill: C.surface, radius: 12,
-    stroke: C.border, align: "CENTER", mainAlign: "CENTER" });
-  photo.primaryAxisSizingMode = "FIXED"; photo.counterAxisSizingMode = "FIXED";
-  photo.resize(248, 90);
-  photo.layoutAlign = "STRETCH";
-  photo.appendChild(textNode("\uD83E\uDDBB", { size: 32, color: C.textMuted }));
-
-  const photoWrap = alFrame("Photo Wrap", { w: 280, pl: 16, pr: 16, pt: 8, pb: 8, gap: 0 });
-  photoWrap.layoutAlign = "STRETCH";
-  photoWrap.appendChild(photo);
-  phone.appendChild(photoWrap);
-
+function screen1C(page, x, y) {
+  var p = phone(page, x, y, "1C. AI Analysing");
+  var cy = navBar(p, 44, "Analysing...", true, "");
+  // Photo
+  R(p, "Photo Bg", 16, cy + 8, 248, 80, C.surface, 12, C.border, 1);
+  T(p, "HA", 120, cy + 30, "\uD83E\uDDBB", 28, "Regular", C.muted);
+  cy += 96;
   // Scanning indicator
-  const indicatorWrap = alFrame("Indicator Wrap", { w: 280, align: "CENTER", gap: 0, pt: 4, pb: 8 });
-  indicatorWrap.layoutAlign = "STRETCH";
-  const indicator = alFrame("Scanning Indicator", { direction: "HORIZONTAL", hug: true, hugCross: true,
-    fill: C.primary, radius: 15, pl: 14, pr: 14, pt: 6, pb: 6, gap: 6 });
-  indicator.appendChild(textNode("Identifying device...", { size: 11, weight: "Semi Bold", color: C.white }));
-  indicatorWrap.appendChild(indicator);
-  phone.appendChild(indicatorWrap);
-
+  R(p, "Indicator Bg", 80, cy, 120, 28, C.primary, 14);
+  T(p, "Indicator", 80, cy + 7, "Identifying device...", 11, "Semi Bold", C.white, 120, "CENTER");
+  cy += 40;
   // Confidence rows
-  const rows = alFrame("Confidence Rows", { w: 280, pl: 16, pr: 16, gap: 12 });
-  rows.layoutAlign = "STRETCH";
-
-  rows.appendChild(confidenceInstance(components.confidenceRow, "Brand detection", "Done",
-    C.successLight, C.successDark, 240, C.success));
-  rows.appendChild(confidenceInstance(components.confidenceRow, "Model identification", "Done",
-    C.successLight, C.successDark, 235, C.success));
-  rows.appendChild(confidenceInstance(components.confidenceRow, "Battery type", "Done",
-    C.successLight, C.successDark, 240, C.success));
-  rows.appendChild(confidenceInstance(components.confidenceRow, "Dome / mould type", "Analysing",
-    C.warningLight, C.amberText, 180, C.warning));
-  rows.appendChild(confidenceInstance(components.confidenceRow, "Technology level", "Estimating",
-    C.warningLight, C.amberText, 100, C.error));
-  phone.appendChild(rows);
-
-  // Annotation
-  const annWrap = alFrame("Annotation Wrap", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  annWrap.layoutAlign = "STRETCH";
-  annWrap.appendChild(annotationInstance(components.annotation,
-    "AI confidence varies by attribute. Brand & model are high confidence. Tech level needs audiologist."));
-  phone.appendChild(annWrap);
-
-  return phone;
+  cy = confidenceRow(p, 16, cy, 248, "Brand detection", "Done", C.okLight, C.okDark, 240, C.ok);
+  cy = confidenceRow(p, 16, cy, 248, "Model identification", "Done", C.okLight, C.okDark, 235, C.ok);
+  cy = confidenceRow(p, 16, cy, 248, "Battery type", "Done", C.okLight, C.okDark, 240, C.ok);
+  cy = confidenceRow(p, 16, cy, 248, "Dome / mould type", "Analysing", C.warnLight, C.amberText, 180, C.warn);
+  cy = confidenceRow(p, 16, cy, 248, "Technology level", "Estimating", C.warnLight, C.amberText, 100, C.err);
+  cy += 8;
+  annotation(p, 16, cy, 248, "AI confidence varies by attribute. Brand & model are high confidence. Tech level needs audiologist.");
 }
 
-function buildScreen1D(page, x, y) {
-  const phone = createPhoneFrame("1D. AI Results");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Scan Results", true, "Edit"));
-
-  // Photo thumbnail
-  const photoWrap = alFrame("Photo Wrap", { w: 280, pl: 16, pr: 16, pt: 8, pb: 4, gap: 0 });
-  photoWrap.layoutAlign = "STRETCH";
-  const photo = alFrame("Photo", { w: 248, h: 64, fill: C.surface, radius: 12,
-    stroke: C.border, align: "CENTER", mainAlign: "CENTER" });
-  photo.primaryAxisSizingMode = "FIXED"; photo.counterAxisSizingMode = "FIXED";
-  photo.resize(248, 64);
-  photo.layoutAlign = "STRETCH";
-  photo.appendChild(textNode("\uD83E\uDDBB", { size: 24, color: C.textMuted }));
-  photoWrap.appendChild(photo);
-  phone.appendChild(photoWrap);
-
+function screen1D(page, x, y) {
+  var p = phone(page, x, y, "1D. AI Results");
+  var cy = navBar(p, 44, "Scan Results", true, "Edit");
+  // Photo
+  R(p, "Photo", 16, cy + 6, 248, 60, C.surface, 12, C.border, 1);
+  T(p, "HA", 122, cy + 20, "\uD83E\uDDBB", 24, "Regular", C.muted);
+  cy += 72;
   // Results card
-  const cardWrap = alFrame("Results Card Wrap", { w: 280, pl: 16, pr: 16, gap: 0, pt: 4 });
-  cardWrap.layoutAlign = "STRETCH";
-
-  const card = alFrame("Results Card", { w: 248, gap: 4, fill: C.white, radius: 12,
-    stroke: C.primary, strokeW: 1.5, p: 12 });
-  card.layoutAlign = "STRETCH";
-
-  // Title row
-  const titleRow = alFrame("Title", { direction: "HORIZONTAL", w: 224, gap: 4, mainAlign: "SPACE_BETWEEN", align: "CENTER" });
-  titleRow.layoutAlign = "STRETCH";
-  titleRow.appendChild(textNode("Phonak Audeo P90-R", { size: 14, weight: "Bold" }));
-  titleRow.appendChild(chipInstance(components.chipGreen, "95%"));
-  card.appendChild(titleRow);
-
-  // Spec rows
-  card.appendChild(specRowInstance(components.specRow, "Brand", "Phonak"));
-  card.appendChild(specRowInstance(components.specRow, "Model", "Audeo Paradise P90-R"));
-  card.appendChild(specRowInstance(components.specRow, "Type", "RIC/RITE"));
-  card.appendChild(specRowInstance(components.specRow, "Year (est.)", "2021 \u270E"));
-  card.appendChild(specRowInstance(components.specRow, "Battery", "Rechargeable (Li-ion)"));
-  card.appendChild(specRowInstance(components.specRow, "Dome", "Open dome \u270E"));
-  card.appendChild(specRowInstance(components.specRow, "Wax Filter", "CeruShield Disk"));
-  card.appendChild(specRowInstance(components.specRow, "Receiver", "M receiver"));
-  cardWrap.appendChild(card);
-  phone.appendChild(cardWrap);
-
-  // Warning card
-  const warnWrap = alFrame("Warning Wrap", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  warnWrap.layoutAlign = "STRETCH";
-  const warn = alFrame("Warning Card", { w: 248, gap: 2, fill: C.amberBg, radius: 12,
-    stroke: C.amberBorder, p: 10 });
-  warn.layoutAlign = "STRETCH";
-  warn.appendChild(textNode("\uD83D\uDD0D Needs Audiologist Review", { size: 12, weight: "Bold", color: C.amberText, w: 228 }));
-  warn.appendChild(textNode("Tech level, programming interface, and gain range require professional assessment.", { size: 10, color: C.amberText, w: 228 }));
-  warnWrap.appendChild(warn);
-  phone.appendChild(warnWrap);
-
-  // Buttons
-  const btnWrap = alFrame("Buttons", { direction: "HORIZONTAL", w: 280, pl: 16, pr: 16, pt: 8, gap: 8 });
-  btnWrap.layoutAlign = "STRETCH";
-  const mainBtn = buttonInstance(components.btnPrimary, "Add to Register");
-  mainBtn.layoutGrow = 1;
-  btnWrap.appendChild(mainBtn);
-
-  const camBtn = alFrame("Camera Btn", { w: 40, h: 42, fill: C.white, radius: 12,
-    stroke: C.primary, strokeW: 1.5, align: "CENTER", mainAlign: "CENTER" });
-  camBtn.primaryAxisSizingMode = "FIXED"; camBtn.counterAxisSizingMode = "FIXED";
-  camBtn.resize(40, 42);
-  camBtn.appendChild(textNode("\uD83D\uDCF7", { size: 16 }));
-  btnWrap.appendChild(camBtn);
-  phone.appendChild(btnWrap);
-
-  return phone;
+  R(p, "Card Bg", 16, cy, 248, 196, C.white, 12, C.primary, 1.5);
+  T(p, "Device Name", 28, cy + 10, "Phonak Audeo P90-R", 14, "Bold", C.text);
+  chip(p, 198, cy + 10, "95%", C.okLight, C.okDark);
+  var sy = cy + 32;
+  sy = specRow(p, 28, sy, 220, "Brand", "Phonak");
+  sy = specRow(p, 28, sy, 220, "Model", "Audeo Paradise P90-R");
+  sy = specRow(p, 28, sy, 220, "Type", "RIC/RITE");
+  sy = specRow(p, 28, sy, 220, "Year (est.)", "2021 \u270E");
+  sy = specRow(p, 28, sy, 220, "Battery", "Rechargeable (Li-ion)");
+  sy = specRow(p, 28, sy, 220, "Dome", "Open dome \u270E");
+  sy = specRow(p, 28, sy, 220, "Wax Filter", "CeruShield Disk");
+  sy = specRow(p, 28, sy, 220, "Receiver", "M receiver");
+  cy += 204;
+  // Warning
+  R(p, "Warn Bg", 16, cy, 248, 56, C.amberBg, 12, C.amberBorder, 1);
+  T(p, "Warn Icon", 28, cy + 6, "\uD83D\uDD0D", 14, "Regular", C.text);
+  T(p, "Warn Title", 48, cy + 8, "Needs Audiologist Review", 12, "Bold", C.amberText, 200);
+  T(p, "Warn Desc", 48, cy + 24, "Tech level, programming interface, and gain range require professional assessment.", 10, "Regular", C.amberText, 200);
+  cy += 64;
+  btn(p, 16, cy, 200, 42, "Add to Register", "primary");
+  R(p, "Cam Btn", 224, cy, 40, 42, C.white, 12, C.primary, 1.5);
+  T(p, "Cam Icon", 232, cy + 12, "\uD83D\uDCF7", 16, "Regular", C.primary);
 }
 
-function buildScreen2A(page, x, y) {
-  const phone = createPhoneFrame("2A. QA Queue");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Devices Awaiting QA", false, "Filter"));
-
-  // Filter chips
-  const filters = alFrame("Filters", { direction: "HORIZONTAL", w: 280, pl: 16, pr: 16,
-    pt: 8, pb: 8, gap: 6 });
-  filters.layoutAlign = "STRETCH";
-  filters.appendChild(chipInstance(components.chipAmber, "\u23F3 12 Pending"));
-  filters.appendChild(chipInstance(components.chipGreen, "\u2713 5 Passed"));
-  filters.appendChild(chipInstance(components.chipRed, "\u2717 2 Failed"));
-  phone.appendChild(filters);
-
-  // List
-  const list = alFrame("Device List", { w: 280, gap: 0 });
-  list.layoutAlign = "STRETCH";
-  list.appendChild(listItemInstance(components.listItem, "Phonak Audeo P90-R", "Donor: PL \u00B7 Scanned 2d ago", "Pending", C.warningLight, C.amberText));
-  list.appendChild(listItemInstance(components.listItem, "Unitron Moxi Next 4", "Donor: PL \u00B7 Scanned 3d ago", "Pending", C.warningLight, C.amberText));
-  list.appendChild(listItemInstance(components.listItem, "GN Resound LiNX 2", "Donor: JM \u00B7 Scanned 5d ago", "Pending", C.warningLight, C.amberText));
-  list.appendChild(listItemInstance(components.listItem, "Oticon Ria 2 P", "Donor: WR \u00B7 QA'd today", "Passed", C.successLight, C.successDark));
-  list.appendChild(listItemInstance(components.listItem, "Signia Motion 13P", "Donor: JH \u00B7 QA'd yesterday", "Passed", C.successLight, C.successDark));
-  list.appendChild(listItemInstance(components.listItem, "Blamey & Saunders", "Donor: EB \u00B7 Non-functional", "Failed", C.errorLight, C.errorDark));
-  phone.appendChild(list);
-
-  const tabBar = components.tabBar2.createInstance();
-  tabBar.layoutPositioning = "ABSOLUTE";
-  tabBar.x = 0; tabBar.y = 504;
-  phone.appendChild(tabBar);
-
-  return phone;
+function screen2A(page, x, y) {
+  var p = phone(page, x, y, "2A. QA Queue");
+  var cy = navBar(p, 44, "Devices Awaiting QA", false, "Filter");
+  cy += 8;
+  chip(p, 16, cy, "\u23F3 12 Pending", C.warnLight, C.amberText);
+  chip(p, 118, cy, "\u2713 5 Passed", C.okLight, C.okDark);
+  chip(p, 200, cy, "\u2717 2 Failed", C.errLight, C.errDark);
+  cy += 30;
+  cy = listItem(p, cy, "Phonak Audeo P90-R", "Donor: PL \u00B7 2d ago", "Pending", C.warnLight, C.amberText);
+  cy = listItem(p, cy, "Unitron Moxi Next 4", "Donor: PL \u00B7 3d ago", "Pending", C.warnLight, C.amberText);
+  cy = listItem(p, cy, "GN Resound LiNX 2", "Donor: JM \u00B7 5d ago", "Pending", C.warnLight, C.amberText);
+  cy = listItem(p, cy, "Oticon Ria 2 P", "Donor: WR \u00B7 today", "Passed", C.okLight, C.okDark);
+  cy = listItem(p, cy, "Signia Motion 13P", "Donor: JH \u00B7 yesterday", "Passed", C.okLight, C.okDark);
+  cy = listItem(p, cy, "Blamey & Saunders", "Donor: EB \u00B7 broken", "Failed", C.errLight, C.errDark);
+  tabBar(p, 2);
 }
 
-function buildScreen2B(page, x, y) {
-  const phone = createPhoneFrame("2B. Audiologist Review");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Review Device", true, "Save"));
-
-  // Progress
-  const progWrap = alFrame("Prog", { w: 280, align: "CENTER", gap: 0 });
-  progWrap.layoutAlign = "STRETCH";
-  progWrap.appendChild(components.progress2of4.createInstance());
-  phone.appendChild(progWrap);
-
-  // AI-confirmed section
-  const confirmed = alFrame("AI Confirmed", { w: 280, pl: 16, pr: 16, gap: 4 });
-  confirmed.layoutAlign = "STRETCH";
-  confirmed.appendChild(sectionHeaderInstance(components.sectionHeader, "AI-Identified (confirmed \u2713)"));
-  confirmed.appendChild(specRowInstance(components.specRow, "Brand", "Phonak", C.success));
-  confirmed.appendChild(specRowInstance(components.specRow, "Model", "Audeo P90-R", C.success));
-  confirmed.appendChild(specRowInstance(components.specRow, "Type", "RIC/RITE", C.success));
-  confirmed.appendChild(specRowInstance(components.specRow, "Battery", "Rechargeable", C.success));
-  phone.appendChild(confirmed);
-
-  phone.appendChild(divider());
-
-  // Audiologist assessment
-  const assessment = alFrame("Assessment", { w: 280, pl: 16, pr: 16, gap: 4 });
-  assessment.layoutAlign = "STRETCH";
-  assessment.appendChild(sectionHeaderInstance(components.sectionHeader, "Audiologist Assessment"));
-  assessment.appendChild(inputInstance(components.inputField, "Technology Level", "Premium (Level 9)"));
-  assessment.appendChild(inputInstance(components.inputField, "Programming Interface", "Noahlink Wireless"));
-  assessment.appendChild(inputInstance(components.inputField, "Gain Range (Fitting Range)", "Mild to Moderate"));
-
-  // Condition chips
-  const condLabel = textNode("PHYSICAL CONDITION", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  condLabel.layoutAlign = "STRETCH";
-  assessment.appendChild(condLabel);
-  assessment.appendChild(chipRow([
-    chipInstance(components.chipGreen, "Good"),
-    chipInstance(components.chipDefault, "Fair"),
-    chipInstance(components.chipDefault, "Poor"),
-  ]));
-  phone.appendChild(assessment);
-
-  // Toggles
-  const toggles = alFrame("Toggles", { w: 280, pl: 16, pr: 16, gap: 4, pt: 4 });
-  toggles.layoutAlign = "STRETCH";
-  toggles.appendChild(toggleInstance(components.toggleOn, "Remote fine-tuning capable?", ""));
-  toggles.appendChild(toggleInstance(components.toggleOn, "App compatible?", ""));
-  toggles.appendChild(toggleInstance(components.toggleOff, "Auracast ready?", ""));
-  phone.appendChild(toggles);
-
-  // CTA
-  const cta = alFrame("CTA", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  cta.layoutAlign = "STRETCH";
-  cta.appendChild(buttonInstance(components.btnPrimary, "\u2713 Mark as QA Passed", true));
-  phone.appendChild(cta);
-
-  return phone;
+function screen2B(page, x, y) {
+  var p = phone(page, x, y, "2B. Audiologist Review");
+  var cy = navBar(p, 44, "Review Device", true, "Save");
+  cy = progressDots(p, cy + 4, 2, 4);
+  cy = sectionHdr(p, 16, cy, "AI-Identified (confirmed \u2713)");
+  cy = specRow(p, 16, cy, 248, "Brand", "Phonak", C.ok);
+  cy = specRow(p, 16, cy, 248, "Model", "Audeo P90-R", C.ok);
+  cy = specRow(p, 16, cy, 248, "Type", "RIC/RITE", C.ok);
+  cy = specRow(p, 16, cy, 248, "Battery", "Rechargeable", C.ok);
+  R(p, "Divider", 16, cy + 2, 248, 1, C.border); cy += 10;
+  cy = sectionHdr(p, 16, cy, "Audiologist Assessment");
+  cy = inputField(p, 16, cy, 248, "Technology Level", "Premium (Level 9)");
+  cy = inputField(p, 16, cy, 248, "Programming Interface", "Noahlink Wireless");
+  cy = inputField(p, 16, cy, 248, "Gain Range", "Mild to Moderate");
+  T(p, "Cond Label", 16, cy, "PHYSICAL CONDITION", 10, "Semi Bold", C.muted);
+  cy += 16;
+  chip(p, 16, cy, "Good", C.okLight, C.okDark);
+  chip(p, 68, cy, "Fair", C.chip, C.muted);
+  chip(p, 108, cy, "Poor", C.chip, C.muted);
+  cy += 30;
+  cy = toggleRow(p, 16, cy, 248, "Remote fine-tuning?", "", true);
+  cy = toggleRow(p, 16, cy, 248, "App compatible?", "", true);
+  cy = toggleRow(p, 16, cy, 248, "Auracast ready?", "", false);
+  cy += 4;
+  btn(p, 16, cy, 248, 42, "\u2713 Mark as QA Passed", "primary");
 }
 
-function buildScreen2C(page, x, y) {
-  const phone = createPhoneFrame("2C. Device Ready");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Device Profile", true, "Share"));
-
-  // Success hero
-  const heroFrame = alFrame("Success Hero", { w: 280, gap: 6, align: "CENTER", pt: 12, pb: 8 });
-  heroFrame.layoutAlign = "STRETCH";
-  const successIcon = alFrame("Success Icon", { w: 64, h: 64, fill: C.successLight, radius: 32,
-    align: "CENTER", mainAlign: "CENTER" });
-  successIcon.primaryAxisSizingMode = "FIXED"; successIcon.counterAxisSizingMode = "FIXED";
-  successIcon.resize(64, 64);
-  successIcon.appendChild(textNode("\u2713", { size: 28, weight: "Bold", color: C.success }));
-  heroFrame.appendChild(successIcon);
-  heroFrame.appendChild(textNode("Phonak Audeo P90-R", { size: 16, weight: "Bold", align: "CENTER", w: 248 }));
-  heroFrame.appendChild(textNode("QA Passed \u00B7 Ready for Matching", { size: 12, color: C.textMuted, align: "CENTER", w: 248 }));
-  phone.appendChild(heroFrame);
-
+function screen2C(page, x, y) {
+  var p = phone(page, x, y, "2C. Device Ready");
+  var cy = navBar(p, 44, "Device Profile", true, "Share");
+  // Success
+  R(p, "Success Bg", 108, cy + 12, 64, 64, C.okLight, 32);
+  T(p, "Check", 124, cy + 28, "\u2713", 28, "Bold", C.ok);
+  T(p, "Name", 0, cy + 84, "Phonak Audeo P90-R", 16, "Bold", C.text, 280, "CENTER");
+  T(p, "Status", 0, cy + 106, "QA Passed \u00B7 Ready for Matching", 12, "Regular", C.muted, 280, "CENTER");
+  cy += 126;
   // Specs card
-  const specsWrap = alFrame("Specs Wrap", { w: 280, pl: 16, pr: 16, gap: 0 });
-  specsWrap.layoutAlign = "STRETCH";
-  const specsCard = alFrame("Specs Card", { w: 248, gap: 4, fill: C.white, radius: 12,
-    stroke: C.border, p: 12 });
-  specsCard.layoutAlign = "STRETCH";
-  specsCard.appendChild(textNode("DEVICE SPECIFICATIONS", { size: 11, weight: "Bold", color: C.textMuted }));
-  specsCard.appendChild(specRowInstance(components.specRow, "Brand", "Phonak"));
-  specsCard.appendChild(specRowInstance(components.specRow, "Model", "Audeo P90-R"));
-  specsCard.appendChild(specRowInstance(components.specRow, "Type", "RIC/RITE"));
-  specsCard.appendChild(specRowInstance(components.specRow, "Tech Level", "Premium (9)"));
-  specsCard.appendChild(specRowInstance(components.specRow, "Fitting Range", "Mild\u2013Moderate"));
-  specsCard.appendChild(specRowInstance(components.specRow, "Battery", "Rechargeable"));
-  specsCard.appendChild(specRowInstance(components.specRow, "Programming", "Noahlink Wireless"));
-  specsWrap.appendChild(specsCard);
-  phone.appendChild(specsWrap);
-
-  // Features card
-  const featWrap = alFrame("Feat Wrap", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  featWrap.layoutAlign = "STRETCH";
-  const featCard = alFrame("Features", { w: 248, gap: 6, fill: C.white, radius: 12,
-    stroke: C.border, p: 12 });
-  featCard.layoutAlign = "STRETCH";
-  featCard.appendChild(textNode("FEATURES", { size: 11, weight: "Bold", color: C.textMuted }));
-  featCard.appendChild(chipRow([
-    chipInstance(components.chipBlue, "Remote Fine-Tuning"),
-    chipInstance(components.chipBlue, "App Compatible"),
-    chipInstance(components.chipBlue, "Bluetooth"),
-  ]));
-  featWrap.appendChild(featCard);
-  phone.appendChild(featWrap);
-
+  R(p, "Specs Card", 16, cy, 248, 176, C.white, 12, C.border, 1);
+  T(p, "Specs Hdr", 28, cy + 8, "DEVICE SPECIFICATIONS", 11, "Bold", C.muted);
+  var sy = cy + 26;
+  sy = specRow(p, 28, sy, 220, "Brand", "Phonak");
+  sy = specRow(p, 28, sy, 220, "Model", "Audeo P90-R");
+  sy = specRow(p, 28, sy, 220, "Type", "RIC/RITE");
+  sy = specRow(p, 28, sy, 220, "Tech Level", "Premium (9)");
+  sy = specRow(p, 28, sy, 220, "Fitting Range", "Mild\u2013Moderate");
+  sy = specRow(p, 28, sy, 220, "Battery", "Rechargeable");
+  sy = specRow(p, 28, sy, 220, "Programming", "Noahlink Wireless");
+  cy += 184;
+  // Features
+  R(p, "Feat Card", 16, cy, 248, 42, C.white, 12, C.border, 1);
+  T(p, "Feat Hdr", 28, cy + 6, "FEATURES", 11, "Bold", C.muted);
+  chip(p, 28, cy + 22, "Remote Fine-Tuning", C.blueLight, C.blue);
+  chip(p, 150, cy + 22, "App Compatible", C.blueLight, C.blue);
+  cy += 50;
   // Lifecycle
-  const lcWrap = alFrame("LC Wrap", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  lcWrap.layoutAlign = "STRETCH";
-  const lcCard = alFrame("Lifecycle", { w: 248, gap: 4, fill: C.white, radius: 12,
-    stroke: C.border, p: 12 });
-  lcCard.layoutAlign = "STRETCH";
-  lcCard.appendChild(textNode("LIFECYCLE", { size: 11, weight: "Bold", color: C.textMuted }));
-  lcCard.appendChild(textNode("Donated \u2192 Scanned \u2192 QA'd \u2192 Matched", { size: 10, weight: "Semi Bold", color: C.textMuted, w: 224 }));
-  lcWrap.appendChild(lcCard);
-  phone.appendChild(lcWrap);
-
-  // CTA
-  const cta = alFrame("CTA", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  cta.layoutAlign = "STRETCH";
-  cta.appendChild(buttonInstance(components.btnPrimary, "Find a Match", true));
-  phone.appendChild(cta);
-
-  return phone;
+  R(p, "LC Card", 16, cy, 248, 32, C.white, 12, C.border, 1);
+  T(p, "LC Text", 28, cy + 10, "Donated \u2192 Scanned \u2192 QA'd \u2192 Matched", 10, "Semi Bold", C.muted);
+  cy += 40;
+  btn(p, 16, cy, 248, 42, "Find a Match", "primary");
 }
 
-function buildScreen3A(page, x, y) {
-  const phone = createPhoneFrame("3A. Donor Signup");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Create Account", true, ""));
-
-  const progWrap = alFrame("Prog", { w: 280, align: "CENTER", gap: 0 });
-  progWrap.layoutAlign = "STRETCH";
-  progWrap.appendChild(components.progress0of3.createInstance());
-  phone.appendChild(progWrap);
-
-  // Title
-  const titleFrame = alFrame("Title", { w: 280, gap: 4, align: "CENTER", pt: 8, pb: 8 });
-  titleFrame.layoutAlign = "STRETCH";
-  titleFrame.appendChild(textNode("I want to...", { size: 15, weight: "Bold", align: "CENTER", w: 248 }));
-  titleFrame.appendChild(textNode("Select your role", { size: 12, color: C.textMuted, align: "CENTER", w: 248 }));
-  phone.appendChild(titleFrame);
-
-  // Role cards
-  const rolesWrap = alFrame("Roles", { w: 280, pl: 16, pr: 16, gap: 8 });
-  rolesWrap.layoutAlign = "STRETCH";
-
-  const roles = [
-    { emoji: "\uD83C\uDF81", title: "Donate a Hearing Aid", sub: "I have a device to give", selected: true },
-    { emoji: "\uD83E\uDD1D", title: "Receive a Hearing Aid", sub: "I need hearing support", selected: false },
-    { emoji: "\uD83E\uDE7A", title: "I'm a Hearing Professional", sub: "Audiologist or clinic", selected: false },
-  ];
-
-  roles.forEach(role => {
-    const card = alFrame("Role Card", { direction: "HORIZONTAL", w: 248, gap: 12,
-      fill: role.selected ? C.primaryLight : C.white, radius: 12,
-      stroke: role.selected ? C.primary : C.border, strokeW: role.selected ? 1.5 : 1,
-      p: 12, align: "CENTER" });
-    card.layoutAlign = "STRETCH";
-    card.appendChild(textNode(role.emoji, { size: 24 }));
-    const info = alFrame("Info", { hug: true, hugCross: true, gap: 2 });
-    info.appendChild(textNode(role.title, { size: 14, weight: role.selected ? "Bold" : "Semi Bold",
-      color: role.selected ? C.primary : C.text }));
-    info.appendChild(textNode(role.sub, { size: 11, color: C.textMuted }));
-    card.appendChild(info);
-    rolesWrap.appendChild(card);
-  });
-  phone.appendChild(rolesWrap);
-
-  // CTA
-  const cta = alFrame("CTA", { w: 280, pl: 16, pr: 16, pt: 12, gap: 0 });
-  cta.layoutAlign = "STRETCH";
-  cta.appendChild(buttonInstance(components.btnPrimary, "Continue", true));
-  phone.appendChild(cta);
-
-  return phone;
+function screen3A(page, x, y) {
+  var p = phone(page, x, y, "3A. Donor Signup");
+  var cy = navBar(p, 44, "Create Account", true, "");
+  cy = progressDots(p, cy + 4, 0, 3);
+  T(p, "Heading", 0, cy + 4, "I want to...", 15, "Bold", C.text, 280, "CENTER");
+  T(p, "Sub", 0, cy + 24, "Select your role", 12, "Regular", C.muted, 280, "CENTER");
+  cy += 48;
+  // Donor (selected)
+  R(p, "Role1 Bg", 16, cy, 248, 56, C.primaryLight, 12, C.primary, 1.5);
+  T(p, "R1 Icon", 28, cy + 10, "\uD83C\uDF81", 24, "Regular", C.text);
+  T(p, "R1 Title", 60, cy + 12, "Donate a Hearing Aid", 14, "Bold", C.primary);
+  T(p, "R1 Sub", 60, cy + 30, "I have a device to give", 11, "Regular", C.muted);
+  cy += 64;
+  // Recipient
+  R(p, "Role2 Bg", 16, cy, 248, 56, C.white, 12, C.border, 1);
+  T(p, "R2 Icon", 28, cy + 10, "\uD83E\uDD1D", 24, "Regular", C.text);
+  T(p, "R2 Title", 60, cy + 12, "Receive a Hearing Aid", 14, "Semi Bold", C.text);
+  T(p, "R2 Sub", 60, cy + 30, "I need hearing support", 11, "Regular", C.muted);
+  cy += 64;
+  // Professional
+  R(p, "Role3 Bg", 16, cy, 248, 56, C.white, 12, C.border, 1);
+  T(p, "R3 Icon", 28, cy + 10, "\uD83E\uDE7A", 24, "Regular", C.text);
+  T(p, "R3 Title", 60, cy + 12, "I'm a Hearing Professional", 14, "Semi Bold", C.text);
+  T(p, "R3 Sub", 60, cy + 30, "Audiologist or clinic", 11, "Regular", C.muted);
+  cy += 72;
+  btn(p, 16, cy, 248, 42, "Continue", "primary");
 }
 
-function buildScreen3B(page, x, y) {
-  const phone = createPhoneFrame("3B. Donation Form");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Donate a Device", true, ""));
-
-  const progWrap = alFrame("Prog", { w: 280, align: "CENTER", gap: 0 });
-  progWrap.layoutAlign = "STRETCH";
-  progWrap.appendChild(components.progress1of3.createInstance());
-  phone.appendChild(progWrap);
-
-  // Device from scan
-  const deviceSection = alFrame("Device Section", { w: 280, pl: 16, pr: 16, gap: 4 });
-  deviceSection.layoutAlign = "STRETCH";
-  deviceSection.appendChild(sectionHeaderInstance(components.sectionHeader, "Device (from scan)"));
-
-  const deviceCard = alFrame("Scanned Device", { direction: "HORIZONTAL", w: 248, gap: 8,
-    fill: C.white, radius: 12, stroke: C.border, p: 10, align: "CENTER" });
-  deviceCard.layoutAlign = "STRETCH";
-  const devIcon = alFrame("Dev Icon", { w: 32, h: 32, fill: C.primaryLight, radius: 8,
-    align: "CENTER", mainAlign: "CENTER" });
-  devIcon.primaryAxisSizingMode = "FIXED"; devIcon.counterAxisSizingMode = "FIXED";
-  devIcon.resize(32, 32);
-  devIcon.appendChild(textNode("\uD83C\uDFA7", { size: 14 }));
-  deviceCard.appendChild(devIcon);
-  const devInfo = alFrame("Dev Info", { hug: true, hugCross: true, gap: 1 });
-  devInfo.layoutGrow = 1;
-  devInfo.appendChild(textNode("Phonak Audeo P90-R", { size: 13, weight: "Bold" }));
-  devInfo.appendChild(textNode("RIC/RITE \u00B7 Rechargeable", { size: 10, color: C.textMuted }));
-  deviceCard.appendChild(devInfo);
-  deviceCard.appendChild(chipInstance(components.chipGreen, "Scanned"));
-  deviceSection.appendChild(deviceCard);
-  phone.appendChild(deviceSection);
-
-  // Form
-  const form = alFrame("Form", { w: 280, pl: 16, pr: 16, gap: 6 });
-  form.layoutAlign = "STRETCH";
-  form.appendChild(sectionHeaderInstance(components.sectionHeader, "About the Device"));
-  form.appendChild(inputInstance(components.inputField, "How old is this device? (approx.)", "Less than 5 years"));
-
-  const condLabel = textNode("CONDITION", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  condLabel.layoutAlign = "STRETCH";
-  form.appendChild(condLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipGreen, "Working"),
-    chipInstance(components.chipDefault, "Not sure"),
-    chipInstance(components.chipDefault, "Broken"),
-  ]));
-
-  const chargerLabel = textNode("DO YOU HAVE THE CHARGER/CASE?", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  chargerLabel.layoutAlign = "STRETCH";
-  form.appendChild(chargerLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipGreen, "Yes"),
-    chipInstance(components.chipDefault, "No"),
-  ]));
-  phone.appendChild(form);
-
-  phone.appendChild(divider());
-
-  // Connection
-  const conn = alFrame("Connection", { w: 280, pl: 16, pr: 16, gap: 4 });
-  conn.layoutAlign = "STRETCH";
-  conn.appendChild(sectionHeaderInstance(components.sectionHeader, "Connection"));
-  conn.appendChild(toggleInstance(components.toggleOn, "I'd like to connect with the recipient", "Optional, anonymous until both agree"));
-  phone.appendChild(conn);
-
-  // CTA
-  const cta = alFrame("CTA", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  cta.layoutAlign = "STRETCH";
-  cta.appendChild(buttonInstance(components.btnPrimary, "Submit Donation", true));
-  phone.appendChild(cta);
-
-  return phone;
+function screen3B(page, x, y) {
+  var p = phone(page, x, y, "3B. Donation Form");
+  var cy = navBar(p, 44, "Donate a Device", true, "");
+  cy = progressDots(p, cy + 4, 1, 3);
+  cy = sectionHdr(p, 16, cy, "Device (from scan)");
+  // Scanned device card
+  R(p, "Dev Card", 16, cy, 248, 48, C.white, 12, C.border, 1);
+  R(p, "Dev Icon Bg", 24, cy + 8, 32, 32, C.primaryLight, 8);
+  T(p, "Dev Emoji", 30, cy + 14, "\uD83C\uDFA7", 16, "Regular", C.text);
+  T(p, "Dev Name", 64, cy + 10, "Phonak Audeo P90-R", 13, "Bold", C.text);
+  T(p, "Dev Info", 64, cy + 26, "RIC/RITE \u00B7 Rechargeable", 10, "Regular", C.muted);
+  chip(p, 200, cy + 14, "Scanned", C.okLight, C.okDark);
+  cy += 56;
+  cy = sectionHdr(p, 16, cy + 4, "About the Device");
+  cy = inputField(p, 16, cy, 248, "How old is this device?", "Less than 5 years");
+  T(p, "Cond Label", 16, cy, "CONDITION", 10, "Semi Bold", C.muted);
+  cy += 16;
+  chip(p, 16, cy, "Working", C.okLight, C.okDark);
+  chip(p, 80, cy, "Not sure", C.chip, C.muted);
+  chip(p, 146, cy, "Broken", C.chip, C.muted);
+  cy += 28;
+  T(p, "Charger", 16, cy, "CHARGER/CASE?", 10, "Semi Bold", C.muted);
+  cy += 16;
+  chip(p, 16, cy, "Yes", C.okLight, C.okDark);
+  chip(p, 56, cy, "No", C.chip, C.muted);
+  cy += 28;
+  R(p, "Divider", 16, cy, 248, 1, C.border);
+  cy += 8;
+  cy = sectionHdr(p, 16, cy, "Connection");
+  cy = toggleRow(p, 16, cy, 248, "I'd like to connect with the recipient", "Optional, anonymous until both agree", true);
+  cy += 8;
+  btn(p, 16, cy, 248, 42, "Submit Donation", "primary");
 }
 
-function buildScreen3C(page, x, y) {
-  const phone = createPhoneFrame("3C. Confirmation");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-
-  // Success hero
-  const hero = alFrame("Success", { w: 280, gap: 8, align: "CENTER", pt: 32, pb: 8 });
-  hero.layoutAlign = "STRETCH";
-  const icon = alFrame("Icon", { w: 80, h: 80, fill: C.successLight, radius: 40,
-    align: "CENTER", mainAlign: "CENTER" });
-  icon.primaryAxisSizingMode = "FIXED"; icon.counterAxisSizingMode = "FIXED";
-  icon.resize(80, 80);
-  icon.appendChild(textNode("\uD83C\uDFB5", { size: 36 }));
-  hero.appendChild(icon);
-  hero.appendChild(textNode("Thank You!", { size: 20, weight: "Extra Bold", color: C.primary, align: "CENTER", w: 248 }));
-  hero.appendChild(textNode("Your Phonak Audeo P90-R has been added to the Recycled Sound register.\n\nAn audiologist will assess the device and we'll notify you when it finds a new home.", { size: 12, color: C.textMuted, align: "CENTER", w: 220 }));
-  phone.appendChild(hero);
-
+function screen3C(page, x, y) {
+  var p = phone(page, x, y, "3C. Confirmation");
+  R(p, "Success Bg", 100, 72, 80, 80, C.okLight, 40);
+  T(p, "Icon", 118, 90, "\uD83C\uDFB5", 36, "Regular", C.text);
+  T(p, "Thanks", 0, 168, "Thank You!", 20, "Extra Bold", C.primary, 280, "CENTER");
+  T(p, "Desc", 30, 198, "Your Phonak Audeo P90-R has been added to the Recycled Sound register.\n\nAn audiologist will assess the device and we'll notify you when it finds a new home.", 12, "Regular", C.muted, 220, "CENTER");
   // Impact card
-  const impactWrap = alFrame("Impact Wrap", { w: 280, pl: 16, pr: 16, gap: 0 });
-  impactWrap.layoutAlign = "STRETCH";
-  const impactCard = alFrame("Impact Card", { w: 248, gap: 4, fill: C.primaryLight, radius: 12,
-    stroke: C.primary, p: 12, align: "CENTER" });
-  impactCard.layoutAlign = "STRETCH";
-  impactCard.appendChild(textNode("YOUR IMPACT", { size: 11, weight: "Semi Bold", color: C.primary, align: "CENTER", w: 224 }));
-  impactCard.appendChild(textNode("\u267B\uFE0F 1 device saved from landfill\n\uD83E\uDD1D Helping someone hear again", { size: 12, align: "CENTER", w: 224 }));
-  impactWrap.appendChild(impactCard);
-  phone.appendChild(impactWrap);
-
-  // Buttons
-  const btns = alFrame("Buttons", { w: 280, pl: 16, pr: 16, pt: 12, gap: 8 });
-  btns.layoutAlign = "STRETCH";
-  btns.appendChild(buttonInstance(components.btnPrimary, "Donate Another Device", true));
-  btns.appendChild(buttonInstance(components.btnGhost, "Go to Home", true));
-  phone.appendChild(btns);
-
-  return phone;
+  R(p, "Impact Bg", 16, 296, 248, 56, C.primaryLight, 12, C.primary, 1);
+  T(p, "Impact Hdr", 0, 304, "YOUR IMPACT", 11, "Semi Bold", C.primary, 280, "CENTER");
+  T(p, "Impact Body", 0, 320, "\u267B\uFE0F 1 device saved from landfill\n\uD83E\uDD1D Helping someone hear again", 12, "Regular", C.text, 280, "CENTER");
+  btn(p, 16, 372, 248, 42, "Donate Another Device", "primary");
+  btn(p, 16, 422, 248, 42, "Go to Home", "ghost");
 }
 
-function buildScreen4A(page, x, y) {
-  const phone = createPhoneFrame("4A. Hearing Needs");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Apply for a Device", true, ""));
-
-  const progWrap = alFrame("Prog", { w: 280, align: "CENTER", gap: 0 });
-  progWrap.layoutAlign = "STRETCH";
-  progWrap.appendChild(components.progress1of4.createInstance());
-  phone.appendChild(progWrap);
-
-  // Title
-  const titleFrame = alFrame("Title", { w: 280, gap: 2, align: "CENTER", pt: 4, pb: 4 });
-  titleFrame.layoutAlign = "STRETCH";
-  titleFrame.appendChild(textNode("Tell us about your hearing", { size: 15, weight: "Bold", align: "CENTER", w: 248 }));
-  titleFrame.appendChild(textNode("This helps us find the right device", { size: 11, color: C.textMuted, align: "CENTER", w: 248 }));
-  phone.appendChild(titleFrame);
-
-  // Form
-  const form = alFrame("Form", { w: 280, pl: 16, pr: 16, gap: 8 });
-  form.layoutAlign = "STRETCH";
-
-  // Degree
-  const degLabel = textNode("DEGREE OF HEARING LOSS", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  degLabel.layoutAlign = "STRETCH";
-  form.appendChild(degLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipDefault, "Mild"),
-    chipInstance(components.chipBlue, "Moderate"),
-    chipInstance(components.chipDefault, "Severe"),
-    chipInstance(components.chipDefault, "Profound"),
-    chipInstance(components.chipDefault, "Not sure"),
-  ]));
-
-  // Ear
-  const earLabel = textNode("WHICH EAR(S)?", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  earLabel.layoutAlign = "STRETCH";
-  form.appendChild(earLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipDefault, "Left"),
-    chipInstance(components.chipDefault, "Right"),
-    chipInstance(components.chipBlue, "Both"),
-  ]));
-
-  // Assessment
-  const assLabel = textNode("RECENT HEARING ASSESSMENT?", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  assLabel.layoutAlign = "STRETCH";
-  form.appendChild(assLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipGreen, "Yes, I can upload it"),
-    chipInstance(components.chipDefault, "No"),
-  ]));
-
-  // Upload area
-  const upload = alFrame("Upload", { w: 248, h: 36, fill: C.white, radius: 8,
-    stroke: C.border, strokeW: 1.5, align: "CENTER", mainAlign: "CENTER" });
-  upload.primaryAxisSizingMode = "FIXED"; upload.counterAxisSizingMode = "FIXED";
-  upload.resize(248, 36);
-  upload.layoutAlign = "STRETCH";
-  upload.appendChild(textNode("\uD83D\uDCC4 Tap to upload PDF or photo", { size: 11, color: C.textMuted }));
-  form.appendChild(upload);
-
-  // Goals
-  const goalsLabel = textNode("WHAT'S MOST IMPORTANT TO YOU?", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  goalsLabel.layoutAlign = "STRETCH";
-  form.appendChild(goalsLabel);
-  form.appendChild(textNode("Select up to 3 communication goals", { size: 10, color: C.textMuted, w: 248 }));
-  form.appendChild(chipRow([
-    chipInstance(components.chipBlue, "Conversations"),
-    chipInstance(components.chipDefault, "Phone calls"),
-    chipInstance(components.chipBlue, "Work"),
-  ]));
-  form.appendChild(chipRow([
-    chipInstance(components.chipDefault, "TV / media"),
-    chipInstance(components.chipDefault, "Learning English"),
-    chipInstance(components.chipBlue, "Social"),
-  ]));
-
-  phone.appendChild(form);
-
-  // CTA
-  const cta = alFrame("CTA", { w: 280, pl: 16, pr: 16, pt: 6, gap: 0 });
-  cta.layoutAlign = "STRETCH";
-  cta.appendChild(buttonInstance(components.btnPrimary, "Continue", true));
-  phone.appendChild(cta);
-
-  return phone;
+function screen4A(page, x, y) {
+  var p = phone(page, x, y, "4A. Hearing Needs");
+  var cy = navBar(p, 44, "Apply for a Device", true, "");
+  cy = progressDots(p, cy + 4, 1, 4);
+  T(p, "Heading", 0, cy + 2, "Tell us about your hearing", 15, "Bold", C.text, 280, "CENTER");
+  T(p, "Sub", 0, cy + 22, "This helps us find the right device", 11, "Regular", C.muted, 280, "CENTER");
+  cy += 40;
+  T(p, "Deg Label", 16, cy, "DEGREE OF HEARING LOSS", 10, "Semi Bold", C.muted);
+  cy += 14;
+  chip(p, 16, cy, "Mild", C.chip, C.muted);
+  var cw = chip(p, 60, cy, "Moderate", C.blueLight, C.blue);
+  chip(p, 128, cy, "Severe", C.chip, C.muted);
+  chip(p, 182, cy, "Profound", C.chip, C.muted);
+  cy += 24;
+  chip(p, 16, cy, "Not sure", C.chip, C.muted);
+  cy += 30;
+  T(p, "Ear Label", 16, cy, "WHICH EAR(S)?", 10, "Semi Bold", C.muted);
+  cy += 14;
+  chip(p, 16, cy, "Left", C.chip, C.muted);
+  chip(p, 60, cy, "Right", C.chip, C.muted);
+  chip(p, 110, cy, "Both", C.blueLight, C.blue);
+  cy += 30;
+  T(p, "Assess Label", 16, cy, "RECENT HEARING ASSESSMENT?", 10, "Semi Bold", C.muted);
+  cy += 14;
+  chip(p, 16, cy, "Yes, I can upload", C.okLight, C.okDark);
+  chip(p, 140, cy, "No", C.chip, C.muted);
+  cy += 28;
+  R(p, "Upload", 16, cy, 248, 32, C.white, 8, C.border, 1.5);
+  T(p, "Upload Hint", 16, cy + 9, "\uD83D\uDCC4 Tap to upload PDF or photo", 11, "Regular", C.muted, 248, "CENTER");
+  cy += 40;
+  T(p, "Goals Label", 16, cy, "WHAT'S MOST IMPORTANT?", 10, "Semi Bold", C.muted);
+  T(p, "Goals Sub", 16, cy + 14, "Select up to 3 communication goals", 10, "Regular", C.muted);
+  cy += 30;
+  chip(p, 16, cy, "Conversations", C.blueLight, C.blue);
+  chip(p, 116, cy, "Phone calls", C.chip, C.muted);
+  cy += 24;
+  chip(p, 16, cy, "Work / meetings", C.blueLight, C.blue);
+  chip(p, 128, cy, "TV / media", C.chip, C.muted);
+  cy += 24;
+  chip(p, 16, cy, "Learning English", C.chip, C.muted);
+  chip(p, 128, cy, "Social connection", C.blueLight, C.blue);
+  cy += 32;
+  btn(p, 16, cy, 248, 42, "Continue", "primary");
 }
 
-function buildScreen4B(page, x, y) {
-  const phone = createPhoneFrame("4B. Your Situation");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "Apply for a Device", true, ""));
-
-  const progWrap = alFrame("Prog", { w: 280, align: "CENTER", gap: 0 });
-  progWrap.layoutAlign = "STRETCH";
-  progWrap.appendChild(components.progress2of4.createInstance());
-  phone.appendChild(progWrap);
-
-  const form = alFrame("Form", { w: 280, pl: 16, pr: 16, gap: 6 });
-  form.layoutAlign = "STRETCH";
-  form.appendChild(sectionHeaderInstance(components.sectionHeader, "About You"));
-  form.appendChild(inputInstance(components.inputField, "Location (suburb or postcode)", "Springvale, VIC 3171", true));
-  form.appendChild(inputInstance(components.inputField, "Country of origin", "Afghanistan"));
-  form.appendChild(inputInstance(components.inputField, "Preferred language", "Dari / Farsi"));
-
-  // Visa
-  const visaLabel = textNode("VISA / RESIDENCY STATUS", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  visaLabel.layoutAlign = "STRETCH";
-  form.appendChild(visaLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipDefault, "Citizen"),
-    chipInstance(components.chipDefault, "PR"),
-    chipInstance(components.chipBlue, "Bridging visa"),
-    chipInstance(components.chipDefault, "Other"),
-  ]));
-
-  // Previous access
-  const prevLabel = textNode("TRIED ACCESSING HEARING AIDS BEFORE?", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  prevLabel.layoutAlign = "STRETCH";
-  form.appendChild(prevLabel);
-  form.appendChild(chipRow([
-    chipInstance(components.chipBlue, "Yes, too expensive"),
-    chipInstance(components.chipDefault, "Not eligible"),
-    chipInstance(components.chipDefault, "No"),
-  ]));
-
-  // Upload
-  const docLabel = textNode("SUPPORTING DOCUMENTS (OPTIONAL)", { size: 10, weight: "Semi Bold", color: C.textMuted });
-  docLabel.layoutAlign = "STRETCH";
-  form.appendChild(docLabel);
-  const docUpload = alFrame("Doc Upload", { w: 248, h: 36, fill: C.white, radius: 8,
-    stroke: C.border, strokeW: 1.5, align: "CENTER", mainAlign: "CENTER" });
-  docUpload.primaryAxisSizingMode = "FIXED"; docUpload.counterAxisSizingMode = "FIXED";
-  docUpload.resize(248, 36);
-  docUpload.layoutAlign = "STRETCH";
-  docUpload.appendChild(textNode("Referral letter, Centrelink card, etc.", { size: 11, color: C.textMuted }));
-  form.appendChild(docUpload);
-  phone.appendChild(form);
-
-  // CTA
-  const cta = alFrame("CTA", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  cta.layoutAlign = "STRETCH";
-  cta.appendChild(buttonInstance(components.btnPrimary, "Submit Application", true));
-  phone.appendChild(cta);
-
-  return phone;
+function screen4B(page, x, y) {
+  var p = phone(page, x, y, "4B. Your Situation");
+  var cy = navBar(p, 44, "Apply for a Device", true, "");
+  cy = progressDots(p, cy + 4, 2, 4);
+  cy = sectionHdr(p, 16, cy, "About You");
+  cy = inputField(p, 16, cy, 248, "Location", "Springvale, VIC 3171", true);
+  cy = inputField(p, 16, cy, 248, "Country of origin", "Afghanistan");
+  cy = inputField(p, 16, cy, 248, "Preferred language", "Dari / Farsi");
+  T(p, "Visa Label", 16, cy, "VISA / RESIDENCY STATUS", 10, "Semi Bold", C.muted);
+  cy += 14;
+  chip(p, 16, cy, "Citizen", C.chip, C.muted);
+  chip(p, 76, cy, "PR", C.chip, C.muted);
+  chip(p, 106, cy, "Bridging visa", C.blueLight, C.blue);
+  chip(p, 202, cy, "Other", C.chip, C.muted);
+  cy += 30;
+  T(p, "Prev Label", 16, cy, "TRIED ACCESSING AIDS BEFORE?", 10, "Semi Bold", C.muted);
+  cy += 14;
+  chip(p, 16, cy, "Yes, too expensive", C.blueLight, C.blue);
+  chip(p, 148, cy, "Not eligible", C.chip, C.muted);
+  cy += 24;
+  chip(p, 16, cy, "No", C.chip, C.muted);
+  cy += 30;
+  T(p, "Doc Label", 16, cy, "SUPPORTING DOCS (OPTIONAL)", 10, "Semi Bold", C.muted);
+  cy += 14;
+  R(p, "Doc Upload", 16, cy, 248, 32, C.white, 8, C.border, 1.5);
+  T(p, "Doc Hint", 16, cy + 9, "Referral letter, Centrelink card, etc.", 11, "Regular", C.muted, 248, "CENTER");
+  cy += 42;
+  btn(p, 16, cy, 248, 42, "Submit Application", "primary");
 }
 
-function buildScreen4C(page, x, y) {
-  const phone = createPhoneFrame("4C. Application Status");
-  phone.x = x; phone.y = y;
-  page.appendChild(phone);
-
-  phone.appendChild(components.statusBar.createInstance());
-  phone.appendChild(navBarInstance(components.navBar, "My Application", false, ""));
-
+function screen4C(page, x, y) {
+  var p = phone(page, x, y, "4C. Application Status");
+  var cy = navBar(p, 44, "My Application", false, "");
   // Status hero
-  const hero = alFrame("Status Hero", { w: 280, gap: 6, align: "CENTER", pt: 16, pb: 8 });
-  hero.layoutAlign = "STRETCH";
-  const statusIcon = alFrame("Icon", { w: 56, h: 56, fill: C.blueLight, radius: 28,
-    align: "CENTER", mainAlign: "CENTER" });
-  statusIcon.primaryAxisSizingMode = "FIXED"; statusIcon.counterAxisSizingMode = "FIXED";
-  statusIcon.resize(56, 56);
-  statusIcon.appendChild(textNode("\u23F3", { size: 24 }));
-  hero.appendChild(statusIcon);
-  hero.appendChild(textNode("Application Received", { size: 16, weight: "Bold", align: "CENTER", w: 248 }));
-  hero.appendChild(textNode("Our team is reviewing your application.\nWe'll be in touch when we find a suitable device.", { size: 12, color: C.textMuted, align: "CENTER", w: 220 }));
-  phone.appendChild(hero);
-
+  R(p, "Status Bg", 112, cy + 12, 56, 56, C.blueLight, 28);
+  T(p, "Clock", 126, cy + 24, "\u23F3", 24, "Regular", C.text);
+  T(p, "Title", 0, cy + 76, "Application Received", 16, "Bold", C.text, 280, "CENTER");
+  T(p, "Desc", 30, cy + 98, "Our team is reviewing your application.\nWe'll be in touch when we find a suitable device.", 12, "Regular", C.muted, 220, "CENTER");
+  cy += 140;
   // Progress card
-  const cardWrap = alFrame("Card Wrap", { w: 280, pl: 16, pr: 16, gap: 0 });
-  cardWrap.layoutAlign = "STRETCH";
-  const card = alFrame("Progress Card", { w: 248, gap: 6, fill: C.white, radius: 12,
-    stroke: C.border, p: 12 });
-  card.layoutAlign = "STRETCH";
-  card.appendChild(textNode("APPLICATION PROGRESS", { size: 11, weight: "Bold", color: C.textMuted }));
-
-  const steps = [
-    { label: "Application submitted", state: "done" },
-    { label: "Under review", state: "active" },
-    { label: "Device matched", state: "pending" },
-    { label: "Device programmed", state: "pending" },
-    { label: "Fitting appointment", state: "pending" },
-    { label: "Active & connected", state: "pending" },
+  R(p, "Card Bg", 16, cy, 248, 200, C.white, 12, C.border, 1);
+  T(p, "Card Hdr", 28, cy + 10, "APPLICATION PROGRESS", 11, "Bold", C.muted);
+  var steps = [
+    { l: "Application submitted", st: "done" },
+    { l: "Under review", st: "active" },
+    { l: "Device matched", st: "pending" },
+    { l: "Device programmed", st: "pending" },
+    { l: "Fitting appointment", st: "pending" },
+    { l: "Active & connected", st: "pending" },
   ];
+  for (var i = 0; i < steps.length; i++) {
+    var sy = cy + 34 + i * 26;
+    var st = steps[i].st;
+    var dotC = st === "done" ? C.ok : st === "active" ? C.warn : C.border;
+    R(p, "Dot " + i, 28, sy, 20, 20, dotC, 10);
+    if (st === "done") T(p, "DotCheck", 33, sy + 4, "\u2713", 10, "Bold", C.white);
+    if (st === "active") T(p, "DotActive", 35, sy + 4, "\u25CF", 8, "Regular", C.white);
+    var tc = st === "pending" ? C.muted : C.text;
+    var tw = st === "active" ? "Semi Bold" : "Regular";
+    T(p, "Step " + i, 56, sy + 4, steps[i].l, 12, tw, tc, 180);
+  }
+  cy += 208;
+  annotation(p, 16, cy, 248, "All state changes are admin-triggered (human in the loop).");
+  tabBar(p, 3);
+}
 
-  steps.forEach(step => {
-    const row = alFrame("Step", { direction: "HORIZONTAL", hug: true, hugCross: true, gap: 8, align: "CENTER" });
-    row.layoutAlign = "STRETCH";
+// ─── Design System Components ─────────────────────────────────
+function buildDesignSystem(dsPage) {
+  // Title
+  T(dsPage, "DS Title", 0, -60, "Design System", 24, "Bold", C.primary, 400);
+  T(dsPage, "DS Sub", 0, -30, "Recycled Sound \u2014 Component Library", 14, "Regular", C.muted, 400);
 
-    const dot = alFrame("Dot", { w: 20, h: 20, radius: 10,
-      fill: step.state === "done" ? C.success : step.state === "active" ? C.warning : C.border,
-      align: "CENTER", mainAlign: "CENTER" });
-    dot.primaryAxisSizingMode = "FIXED"; dot.counterAxisSizingMode = "FIXED";
-    dot.resize(20, 20);
-    if (step.state === "done") dot.appendChild(textNode("\u2713", { size: 10, weight: "Bold", color: C.white }));
-    row.appendChild(dot);
+  // Colour swatches
+  T(dsPage, "Colours Hdr", 0, 0, "Colours", 16, "Bold", C.text);
+  var colours = [
+    ["Primary", C.primary], ["Primary Light", C.primaryLight], ["Accent", C.accent],
+    ["Success", C.ok], ["Success Light", C.okLight],
+    ["Warning", C.warn], ["Warning Light", C.warnLight],
+    ["Error", C.err], ["Error Light", C.errLight],
+    ["Blue Light", C.blueLight], ["Text", C.text], ["Muted", C.muted],
+    ["Border", C.border], ["Surface", C.surface], ["White", C.white],
+  ];
+  for (var i = 0; i < colours.length; i++) {
+    var cx = (i % 5) * 80;
+    var ry = 24 + Math.floor(i / 5) * 60;
+    R(dsPage, colours[i][0], cx, ry, 64, 40, colours[i][1], 8, C.border, 1);
+    T(dsPage, colours[i][0] + " label", cx, ry + 44, colours[i][0], 9, "Regular", C.muted);
+  }
 
-    const textColor = step.state === "pending" ? C.textMuted : C.text;
-    const textWeight = step.state === "active" ? "Semi Bold" : "Regular";
-    row.appendChild(textNode(step.label, { size: 12, weight: textWeight, color: textColor }));
-    card.appendChild(row);
-  });
+  var by = 220;
+  // Typography
+  T(dsPage, "Type Hdr", 0, by, "Typography", 16, "Bold", C.text);
+  by += 24;
+  T(dsPage, "H1 Sample", 0, by, "Heading 1 \u2014 Extra Bold 20", 20, "Extra Bold", C.text); by += 30;
+  T(dsPage, "H2 Sample", 0, by, "Heading 2 \u2014 Bold 18", 18, "Bold", C.text); by += 26;
+  T(dsPage, "H3 Sample", 0, by, "Heading 3 \u2014 Bold 16", 16, "Bold", C.text); by += 24;
+  T(dsPage, "H4 Sample", 0, by, "Heading 4 \u2014 Bold 15", 15, "Bold", C.text); by += 22;
+  T(dsPage, "Body Sample", 0, by, "Body \u2014 Regular 13", 13, "Regular", C.text); by += 20;
+  T(dsPage, "Caption Sample", 0, by, "Caption \u2014 Regular 11", 11, "Regular", C.muted); by += 18;
+  T(dsPage, "Label Sample", 0, by, "LABEL \u2014 SEMI BOLD 10", 10, "Semi Bold", C.muted); by += 18;
+  T(dsPage, "Chip Sample", 0, by, "Chip \u2014 Semi Bold 10", 10, "Semi Bold", C.text);
 
-  cardWrap.appendChild(card);
-  phone.appendChild(cardWrap);
+  by += 40;
+  // Buttons
+  T(dsPage, "Btn Hdr", 0, by, "Buttons", 16, "Bold", C.text); by += 24;
+  btn(dsPage, 0, by, 200, 44, "Primary Button", "primary"); by += 52;
+  btn(dsPage, 0, by, 200, 44, "Outline Button", "outline"); by += 52;
+  btn(dsPage, 0, by, 200, 44, "Ghost Button", "ghost");
 
+  by += 60;
+  // Chips
+  T(dsPage, "Chip Hdr", 0, by, "Chips / Tags", 16, "Bold", C.text); by += 24;
+  chip(dsPage, 0, by, "Success", C.okLight, C.okDark);
+  chip(dsPage, 80, by, "Warning", C.warnLight, C.amberText);
+  chip(dsPage, 160, by, "Error", C.errLight, C.errDark);
+  by += 28;
+  chip(dsPage, 0, by, "Info / Selected", C.blueLight, C.blue);
+  chip(dsPage, 120, by, "Default", C.chip, C.muted);
+
+  by += 40;
+  // Input field
+  T(dsPage, "Input Hdr", 0, by, "Input Fields", 16, "Bold", C.text); by += 24;
+  inputField(dsPage, 0, by, 248, "Label", "Value text");
+  by += 58;
+  inputField(dsPage, 0, by, 248, "Filled Field", "Springvale, VIC", true);
+
+  by += 72;
+  // Toggle
+  T(dsPage, "Toggle Hdr", 0, by, "Toggles", 16, "Bold", C.text); by += 24;
+  toggleRow(dsPage, 0, by, 248, "Toggle On", "Description", true);
+  by += 40;
+  toggleRow(dsPage, 0, by, 248, "Toggle Off", "Description", false);
+
+  by += 48;
+  // Spec row
+  T(dsPage, "Spec Hdr", 0, by, "Spec Rows", 16, "Bold", C.text); by += 24;
+  specRow(dsPage, 0, by, 248, "Label", "Value"); by += 22;
+  specRow(dsPage, 0, by, 248, "Confirmed", "Value", C.ok);
+
+  by += 36;
   // Annotation
-  const annWrap = alFrame("Ann Wrap", { w: 280, pl: 16, pr: 16, pt: 8, gap: 0 });
-  annWrap.layoutAlign = "STRETCH";
-  annWrap.appendChild(annotationInstance(components.annotation,
-    "All state changes are admin-triggered (human in the loop)."));
-  phone.appendChild(annWrap);
+  T(dsPage, "Ann Hdr", 0, by, "Annotations", 16, "Bold", C.text); by += 24;
+  annotation(dsPage, 0, by, 248, "Design note or implementation callout.");
 
-  const tabBar = components.tabBar3.createInstance();
-  tabBar.layoutPositioning = "ABSOLUTE";
-  tabBar.x = 0; tabBar.y = 504;
-  phone.appendChild(tabBar);
+  by += 72;
+  // Confidence row
+  T(dsPage, "Conf Hdr", 0, by, "Confidence Rows", 16, "Bold", C.text); by += 24;
+  confidenceRow(dsPage, 0, by, 248, "High confidence", "Done", C.okLight, C.okDark, 235, C.ok);
+  by += 36;
+  confidenceRow(dsPage, 0, by, 248, "Medium confidence", "Analysing", C.warnLight, C.amberText, 150, C.warn);
 
-  return phone;
+  by += 48;
+  // List item
+  T(dsPage, "List Hdr", 0, by, "List Items", 16, "Bold", C.text); by += 24;
+  listItem(dsPage, by, "Device Name", "Subtitle text", "Status", C.warnLight, C.amberText);
+
+  by += 72;
+  // Nav bar
+  T(dsPage, "Nav Hdr", 0, by, "Navigation", 16, "Bold", C.text); by += 24;
+  var navG = G(dsPage, "Nav Bar Sample", 0, by);
+  navG.resize(280, 44);
+  navBar(navG, 0, "Page Title", true, "Action");
+
+  by += 56;
+  // Tab bar
+  T(dsPage, "Tab Hdr", 0, by, "Tab Bars", 16, "Bold", C.text); by += 24;
+  var tabG = G(dsPage, "Tab Bar Sample", 0, by);
+  tabG.resize(280, 64);
+  tabBar(tabG, 0);
+
+  // Create paint styles
+  var styleColors = [
+    ["Primary", C.primary], ["Primary Light", C.primaryLight], ["Accent", C.accent],
+    ["Text", C.text], ["Text Muted", C.muted], ["Border", C.border], ["Surface", C.surface],
+    ["Success", C.ok], ["Success Light", C.okLight], ["Warning", C.warn],
+    ["Error", C.err], ["Blue Light", C.blueLight], ["White", C.white],
+  ];
+  for (var i = 0; i < styleColors.length; i++) {
+    var ps = figma.createPaintStyle();
+    ps.name = "Recycled Sound / " + styleColors[i][0];
+    ps.paints = s(styleColors[i][1]);
+  }
 }
 
 // ─── Main ─────────────────────────────────────────────────────
 async function main() {
   await loadFonts();
 
-  // ── Create Design System Page ──
-  const dsPage = figma.createPage();
+  // Use current page for Design System
+  var dsPage = figma.currentPage;
   dsPage.name = "Design System";
+  buildDesignSystem(dsPage);
 
-  // Paint styles
-  createPaintStyle("Primary", C.primary);
-  createPaintStyle("Primary Light", C.primaryLight);
-  createPaintStyle("Accent", C.accent);
-  createPaintStyle("Text", C.text);
-  createPaintStyle("Text Muted", C.textMuted);
-  createPaintStyle("Border", C.border);
-  createPaintStyle("Surface", C.surface);
-  createPaintStyle("White", C.white);
-  createPaintStyle("Success", C.success);
-  createPaintStyle("Success Light", C.successLight);
-  createPaintStyle("Warning", C.warning);
-  createPaintStyle("Warning Light", C.warningLight);
-  createPaintStyle("Error", C.error);
-  createPaintStyle("Error Light", C.errorLight);
-  createPaintStyle("Blue Light", C.blueLight);
-
-  // Text styles
-  createTextStyle("Heading / H1", 20, "Extra Bold", 28);
-  createTextStyle("Heading / H2", 18, "Extra Bold", 24);
-  createTextStyle("Heading / H3", 16, "Bold", 22);
-  createTextStyle("Heading / H4", 15, "Bold", 20);
-  createTextStyle("Body / Regular", 13, "Regular", 18);
-  createTextStyle("Body / Medium", 13, "Medium", 18);
-  createTextStyle("Body / Semi Bold", 13, "Semi Bold", 18);
-  createTextStyle("Caption / Regular", 11, "Regular", 16);
-  createTextStyle("Caption / Semi Bold", 11, "Semi Bold", 16);
-  createTextStyle("Label / Uppercase", 10, "Semi Bold", 14);
-  createTextStyle("Chip / Text", 10, "Semi Bold", 14);
-  createTextStyle("Button / Label", 14, "Semi Bold", 20);
-  createTextStyle("Nav / Title", 15, "Semi Bold", 20);
-
-  // ── Create Components ──
-  let cx = 0;
-  const COL_GAP = 320;
-
-  // Notch
-  components.notch = createNotchComponent();
-  dsPage.appendChild(components.notch);
-  components.notch.x = cx; components.notch.y = 0;
-
-  // Status bars
-  components.statusBar = createStatusBarComponent(false);
-  dsPage.appendChild(components.statusBar);
-  components.statusBar.x = cx; components.statusBar.y = 40;
-
-  components.statusBarDark = createStatusBarComponent(true);
-  dsPage.appendChild(components.statusBarDark);
-  components.statusBarDark.x = cx; components.statusBarDark.y = 100;
-
-  // Nav bar
-  components.navBar = createNavBarComponent();
-  dsPage.appendChild(components.navBar);
-  components.navBar.x = cx; components.navBar.y = 160;
-  cx += COL_GAP;
-
-  // Buttons
-  components.btnPrimary = createButtonComponent("Button / Primary", C.primary, C.white);
-  dsPage.appendChild(components.btnPrimary);
-  components.btnPrimary.x = cx; components.btnPrimary.y = 0;
-
-  components.btnOutline = createButtonComponent("Button / Outline", C.white, C.primary, C.primary);
-  dsPage.appendChild(components.btnOutline);
-  components.btnOutline.x = cx; components.btnOutline.y = 60;
-
-  components.btnGhost = createButtonComponent("Button / Ghost", C.surface, C.text, C.border);
-  dsPage.appendChild(components.btnGhost);
-  components.btnGhost.x = cx; components.btnGhost.y = 120;
-
-  // Input field
-  components.inputField = createInputFieldComponent();
-  dsPage.appendChild(components.inputField);
-  components.inputField.x = cx; components.inputField.y = 200;
-  cx += COL_GAP;
-
-  // Chips
-  components.chipGreen = createChipComponent("Chip / Green", C.successLight, C.successDark);
-  dsPage.appendChild(components.chipGreen);
-  components.chipGreen.x = cx; components.chipGreen.y = 0;
-
-  components.chipAmber = createChipComponent("Chip / Amber", C.warningLight, C.amberText);
-  dsPage.appendChild(components.chipAmber);
-  components.chipAmber.x = cx; components.chipAmber.y = 40;
-
-  components.chipRed = createChipComponent("Chip / Red", C.errorLight, C.errorDark);
-  dsPage.appendChild(components.chipRed);
-  components.chipRed.x = cx; components.chipRed.y = 80;
-
-  components.chipBlue = createChipComponent("Chip / Blue", C.blueLight, C.blue);
-  dsPage.appendChild(components.chipBlue);
-  components.chipBlue.x = cx; components.chipBlue.y = 120;
-
-  components.chipDefault = createChipComponent("Chip / Default", C.chipDefault, C.textMuted);
-  dsPage.appendChild(components.chipDefault);
-  components.chipDefault.x = cx; components.chipDefault.y = 160;
-
-  // Spec row
-  components.specRow = createSpecRowComponent();
-  dsPage.appendChild(components.specRow);
-  components.specRow.x = cx; components.specRow.y = 220;
-
-  // Section header
-  components.sectionHeader = createSectionHeaderComponent();
-  dsPage.appendChild(components.sectionHeader);
-  components.sectionHeader.x = cx; components.sectionHeader.y = 260;
-  cx += COL_GAP;
-
-  // List item
-  components.listItem = createListItemComponent();
-  dsPage.appendChild(components.listItem);
-  components.listItem.x = cx; components.listItem.y = 0;
-
-  // Confidence row
-  components.confidenceRow = createConfidenceRowComponent();
-  dsPage.appendChild(components.confidenceRow);
-  components.confidenceRow.x = cx; components.confidenceRow.y = 80;
-
-  // Annotation
-  components.annotation = createAnnotationComponent();
-  dsPage.appendChild(components.annotation);
-  components.annotation.x = cx; components.annotation.y = 160;
-
-  // Toggles
-  components.toggleOn = createToggleComponent(true);
-  dsPage.appendChild(components.toggleOn);
-  components.toggleOn.x = cx; components.toggleOn.y = 240;
-
-  components.toggleOff = createToggleComponent(false);
-  dsPage.appendChild(components.toggleOff);
-  components.toggleOff.x = cx; components.toggleOff.y = 300;
-  cx += COL_GAP;
-
-  // Tab bars
-  components.tabBar0 = createTabBarComponent(0);
-  dsPage.appendChild(components.tabBar0);
-  components.tabBar0.x = cx; components.tabBar0.y = 0;
-
-  components.tabBar1 = createTabBarComponent(1);
-  dsPage.appendChild(components.tabBar1);
-  components.tabBar1.x = cx; components.tabBar1.y = 70;
-
-  components.tabBar2 = createTabBarComponent(2);
-  dsPage.appendChild(components.tabBar2);
-  components.tabBar2.x = cx; components.tabBar2.y = 140;
-
-  components.tabBar3 = createTabBarComponent(3);
-  dsPage.appendChild(components.tabBar3);
-  components.tabBar3.x = cx; components.tabBar3.y = 210;
-
-  // Progress steps
-  components.progress0of3 = createProgressStepsComponent(0, 3);
-  dsPage.appendChild(components.progress0of3);
-  components.progress0of3.x = cx; components.progress0of3.y = 290;
-
-  components.progress1of3 = createProgressStepsComponent(1, 3);
-  dsPage.appendChild(components.progress1of3);
-  components.progress1of3.x = cx; components.progress1of3.y = 320;
-
-  components.progress1of4 = createProgressStepsComponent(1, 4);
-  dsPage.appendChild(components.progress1of4);
-  components.progress1of4.x = cx; components.progress1of4.y = 350;
-
-  components.progress2of4 = createProgressStepsComponent(2, 4);
-  dsPage.appendChild(components.progress2of4);
-  components.progress2of4.x = cx; components.progress2of4.y = 380;
-
-  // Card (generic)
-  components.card = createCardComponent();
-  dsPage.appendChild(components.card);
-  components.card.x = cx; components.card.y = 420;
-
-  // ── Create Wireframes Page ──
-  const wfPage = figma.createPage();
-  wfPage.name = "Wireframes";
-  figma.currentPage = wfPage;
-
-  const GAP = 80;
-  const PHONE_W = 280;
-  const ROW_GAP = 160;
-
-  function flowLabel(x, y, title, desc) {
-    const t = textNode(title, { size: 24, weight: "Bold" });
-    t.x = x; t.y = y;
-    wfPage.appendChild(t);
-    if (desc) {
-      const d = textNode(desc, { size: 14, color: C.textMuted, w: 900 });
-      d.x = x; d.y = y + 36;
-      wfPage.appendChild(d);
+  // Create Wireframes page
+  var wfPage;
+  var existing = figma.root.children.find(function(p) { return p.name === "Wireframes"; });
+  if (existing) {
+    wfPage = existing;
+  } else {
+    try {
+      wfPage = figma.createPage();
+      wfPage.name = "Wireframes";
+    } catch (e) {
+      // Free plan: place wireframes on same page, offset right
+      wfPage = dsPage;
     }
   }
+  figma.currentPage = wfPage;
 
-  function screenLabel(x, y, label) {
-    const t = textNode(label, { size: 12, weight: "Semi Bold", color: C.textMuted, align: "CENTER", w: PHONE_W });
-    t.x = x; t.y = y;
-    wfPage.appendChild(t);
-  }
+  var GAP = 80, PW = 280, RGAP = 160;
+  var offsetX = (wfPage === dsPage) ? 600 : 0;
 
   // Title
-  const mainTitle = textNode("Recycled Sound", { size: 36, weight: "Extra Bold", color: C.primary });
-  mainTitle.x = 0; mainTitle.y = -80;
-  wfPage.appendChild(mainTitle);
-  const subTitle = textNode("Wireframes v0.1 \u2014 Hearing Aid Scanner Flow + Donor Journey", { size: 14, color: C.textMuted });
-  subTitle.x = 0; subTitle.y = -36;
-  wfPage.appendChild(subTitle);
+  T(wfPage, "Title", offsetX, -80, "Recycled Sound", 36, "Extra Bold", C.primary, 600);
+  T(wfPage, "Subtitle", offsetX, -36, "Wireframes v0.1 \u2014 Hearing Aid Scanner Flow + Donor Journey", 14, "Regular", C.muted, 600);
 
-  // ── Flow 1 ──
-  let rowY = 0;
-  flowLabel(0, rowY, "Flow 1: Hearing Aid Scanner",
-    "Google Lens-style: photograph a hearing aid, AI identifies brand, model, year, battery, wax filters, domes, moulds.");
-  const l1Y = rowY + 80;
-  const p1Y = l1Y + 24;
-  for (let i = 0; i < 4; i++) screenLabel(i * (PHONE_W + GAP), l1Y, ["1A. HOME", "1B. CAMERA", "1C. AI ANALYSING", "1D. AI RESULTS"][i]);
-  buildScreen1A(wfPage, 0, p1Y);
-  buildScreen1B(wfPage, PHONE_W + GAP, p1Y);
-  buildScreen1C(wfPage, 2 * (PHONE_W + GAP), p1Y);
-  buildScreen1D(wfPage, 3 * (PHONE_W + GAP), p1Y);
+  // Flow 1
+  var rowY = 0;
+  T(wfPage, "F1 Title", offsetX, rowY, "Flow 1: Hearing Aid Scanner", 24, "Bold", C.text, 900);
+  T(wfPage, "F1 Desc", offsetX, rowY + 36, "Google Lens-style: photograph a hearing aid, AI identifies brand, model, year, battery, wax filters, domes, moulds.", 14, "Regular", C.muted, 900);
+  var lY = rowY + 80, pY = lY + 24;
+  var labels1 = ["1A. HOME", "1B. CAMERA", "1C. AI ANALYSING", "1D. AI RESULTS"];
+  for (var i = 0; i < 4; i++) T(wfPage, labels1[i], offsetX + i * (PW + GAP), lY, labels1[i], 12, "Semi Bold", C.muted, PW, "CENTER");
+  screen1A(wfPage, offsetX + 0 * (PW + GAP), pY);
+  screen1B(wfPage, offsetX + 1 * (PW + GAP), pY);
+  screen1C(wfPage, offsetX + 2 * (PW + GAP), pY);
+  screen1D(wfPage, offsetX + 3 * (PW + GAP), pY);
 
-  // ── Flow 2 ──
-  rowY = p1Y + 560 + ROW_GAP;
-  flowLabel(0, rowY, "Flow 2: Audiologist Review & QA",
-    "Audiologist confirms AI specs, adds tech level / programming interface / gain range. Human-in-the-loop gate.");
-  const l2Y = rowY + 80;
-  const p2Y = l2Y + 24;
-  for (let i = 0; i < 3; i++) screenLabel(i * (PHONE_W + GAP), l2Y, ["2A. QA QUEUE", "2B. AUDIOLOGIST REVIEW", "2C. DEVICE READY"][i]);
-  buildScreen2A(wfPage, 0, p2Y);
-  buildScreen2B(wfPage, PHONE_W + GAP, p2Y);
-  buildScreen2C(wfPage, 2 * (PHONE_W + GAP), p2Y);
+  // Flow 2
+  rowY = pY + 560 + RGAP;
+  T(wfPage, "F2 Title", offsetX, rowY, "Flow 2: Audiologist Review & QA", 24, "Bold", C.text, 900);
+  T(wfPage, "F2 Desc", offsetX, rowY + 36, "Audiologist confirms AI specs, adds tech level / programming interface / gain range. Human-in-the-loop gate.", 14, "Regular", C.muted, 900);
+  lY = rowY + 80; pY = lY + 24;
+  var labels2 = ["2A. QA QUEUE", "2B. AUDIOLOGIST REVIEW", "2C. DEVICE READY"];
+  for (var i = 0; i < 3; i++) T(wfPage, labels2[i], offsetX + i * (PW + GAP), lY, labels2[i], 12, "Semi Bold", C.muted, PW, "CENTER");
+  screen2A(wfPage, offsetX + 0 * (PW + GAP), pY);
+  screen2B(wfPage, offsetX + 1 * (PW + GAP), pY);
+  screen2C(wfPage, offsetX + 2 * (PW + GAP), pY);
 
-  // ── Flow 3 ──
-  rowY = p2Y + 560 + ROW_GAP;
-  flowLabel(0, rowY, "Flow 3: Donor Journey",
-    "Donor signs up, scans device, fills donation form, gets impact confirmation.");
-  const l3Y = rowY + 80;
-  const p3Y = l3Y + 24;
-  for (let i = 0; i < 3; i++) screenLabel(i * (PHONE_W + GAP), l3Y, ["3A. DONOR SIGNUP", "3B. DONATION FORM", "3C. CONFIRMATION"][i]);
-  buildScreen3A(wfPage, 0, p3Y);
-  buildScreen3B(wfPage, PHONE_W + GAP, p3Y);
-  buildScreen3C(wfPage, 2 * (PHONE_W + GAP), p3Y);
+  // Flow 3
+  rowY = pY + 560 + RGAP;
+  T(wfPage, "F3 Title", offsetX, rowY, "Flow 3: Donor Journey", 24, "Bold", C.text, 900);
+  T(wfPage, "F3 Desc", offsetX, rowY + 36, "Donor signs up, scans device, fills donation form, gets impact confirmation.", 14, "Regular", C.muted, 900);
+  lY = rowY + 80; pY = lY + 24;
+  var labels3 = ["3A. DONOR SIGNUP", "3B. DONATION FORM", "3C. CONFIRMATION"];
+  for (var i = 0; i < 3; i++) T(wfPage, labels3[i], offsetX + i * (PW + GAP), lY, labels3[i], 12, "Semi Bold", C.muted, PW, "CENTER");
+  screen3A(wfPage, offsetX + 0 * (PW + GAP), pY);
+  screen3B(wfPage, offsetX + 1 * (PW + GAP), pY);
+  screen3C(wfPage, offsetX + 2 * (PW + GAP), pY);
 
-  // ── Flow 4 ──
-  rowY = p3Y + 560 + ROW_GAP;
-  flowLabel(0, rowY, "Flow 4: Recipient Application",
-    "Recipient describes hearing needs, situation, and tracks application status. All admin-mediated.");
-  const l4Y = rowY + 80;
-  const p4Y = l4Y + 24;
-  for (let i = 0; i < 3; i++) screenLabel(i * (PHONE_W + GAP), l4Y, ["4A. HEARING NEEDS", "4B. YOUR SITUATION", "4C. APPLICATION STATUS"][i]);
-  buildScreen4A(wfPage, 0, p4Y);
-  buildScreen4B(wfPage, PHONE_W + GAP, p4Y);
-  buildScreen4C(wfPage, 2 * (PHONE_W + GAP), p4Y);
+  // Flow 4
+  rowY = pY + 560 + RGAP;
+  T(wfPage, "F4 Title", offsetX, rowY, "Flow 4: Recipient Application", 24, "Bold", C.text, 900);
+  T(wfPage, "F4 Desc", offsetX, rowY + 36, "Recipient describes hearing needs, situation, and tracks application status. All admin-mediated.", 14, "Regular", C.muted, 900);
+  lY = rowY + 80; pY = lY + 24;
+  var labels4 = ["4A. HEARING NEEDS", "4B. YOUR SITUATION", "4C. APPLICATION STATUS"];
+  for (var i = 0; i < 3; i++) T(wfPage, labels4[i], offsetX + i * (PW + GAP), lY, labels4[i], 12, "Semi Bold", C.muted, PW, "CENTER");
+  screen4A(wfPage, offsetX + 0 * (PW + GAP), pY);
+  screen4B(wfPage, offsetX + 1 * (PW + GAP), pY);
+  screen4C(wfPage, offsetX + 2 * (PW + GAP), pY);
 
-  // ── Done ──
   figma.viewport.scrollAndZoomIntoView(wfPage.children);
-  figma.notify("\uD83C\uDFB5 Recycled Sound wireframes generated with design system!", { timeout: 4000 });
+  figma.notify("\uD83C\uDFB5 Recycled Sound: 13 screens + design system generated!", { timeout: 4000 });
   figma.closePlugin();
 }
 
-main();
+main().catch(function(err) {
+  figma.notify("Error: " + err.message, { error: true, timeout: 10000 });
+  console.error(err);
+  figma.closePlugin();
+});
