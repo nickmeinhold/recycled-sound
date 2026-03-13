@@ -605,6 +605,139 @@ function screen4C(page, x, y) {
   tabBar(p, 3);
 }
 
+// ─── Flow 5: Privacy & Consent ────────────────────────────────
+
+function consentCard(parent, x, y, ww, icon, title, desc, detail, on) {
+  var h = detail ? 82 : 56;
+  R(parent, "Card:" + title, x, y, ww, h, C.surface, 12, C.border, 1.5);
+  T(parent, "Icon:" + title, x + 12, y + 10, icon + " " + title, 12, "Bold", C.text, ww - 68);
+  T(parent, "Desc:" + title, x + 12, y + 26, desc, 10, "Regular", C.muted, ww - 68);
+  // Toggle
+  R(parent, "Track:" + title, x + ww - 52, y + 10, 40, 22, on ? C.primary : C.border, 11);
+  R(parent, "Knob:" + title, on ? x + ww - 32 : x + ww - 52 + 2, y + 12, 18, 18, C.white, 9);
+  if (detail) {
+    R(parent, "Divider:" + title, x + 12, y + 48, ww - 24, 1, C.border);
+    T(parent, "Detail:" + title, x + 12, y + 54, detail, 9, "Regular", C.muted, ww - 24);
+  }
+  return y + h + 8;
+}
+
+function langChips(parent, x, y, full) {
+  chip(parent, x, y, "English", C.blueLight, C.blue);
+  chip(parent, x + 66, y, "\u062F\u0631\u06CC", C.chip, C.muted);
+  chip(parent, x + 102, y, "\u0639\u0631\u0628\u06CC", C.chip, C.muted);
+  if (full) {
+    chip(parent, x + 140, y, "Tamil", C.chip, C.muted);
+    chip(parent, x + 184, y, "More...", C.chip, C.muted);
+  } else {
+    chip(parent, x + 140, y, "More...", C.chip, C.muted);
+  }
+  return y + 28;
+}
+
+function screen5A(page, x, y) {
+  var p = phone(page, x, y, "5A. Data Consent");
+  var cy = navBar(p, 44, "Your Privacy", true, "");
+  // Lock icon
+  R(p, "Lock Bg", 116, cy + 8, 48, 48, C.blueLight, 24);
+  T(p, "Lock Icon", 126, cy + 18, "\uD83D\uDD12", 20, "Regular", C.text);
+  T(p, "Title", 0, cy + 62, "Your Data, Your Choice", 15, "Extra Bold", C.text, 280, "CENTER");
+  T(p, "Sub", 20, cy + 82, "We need your permission to collect some\ninformation. You can change these anytime.", 11, "Regular", C.muted, 240, "CENTER");
+  cy += 112;
+  cy = langChips(p, 16, cy, true);
+  // Consent cards
+  cy = consentCard(p, 16, cy, 248, "\uD83C\uDFE5", "Health Information", "Hearing loss, audiograms, device needs", "Required to match you with the right hearing aid. Seen by: audiologists & admin only.", true);
+  cy = consentCard(p, 16, cy, 248, "\uD83D\uDC64", "Personal Details", "Country, language, visa status", "Helps us prioritise people with greatest need. Seen by: admin only.", true);
+  cy = consentCard(p, 16, cy, 248, "\uD83D\uDCEC", "Communications", "Updates about your application or donation", "We'll only contact you about your hearing aid journey.", true);
+  cy = consentCard(p, 16, cy, 248, "\uD83D\uDCF8", "Impact Stories (Optional)", "Share your story to help us get more aids", null, false);
+  btn(p, 16, cy, 248, 42, "I Agree & Continue", "primary");
+  T(p, "Link", 0, cy + 48, "Read full privacy policy", 10, "Regular", C.primary, 280, "CENTER");
+}
+
+function screen5B(page, x, y) {
+  var p = phone(page, x, y, "5B. Privacy Summary");
+  var cy = navBar(p, 44, "Privacy Policy", true, "");
+  cy += 4;
+  cy = langChips(p, 16, cy, false);
+  T(p, "Heading", 16, cy, "Plain-Language Summary", 14, "Bold", C.text, 248);
+  T(p, "Updated", 16, cy + 18, "Last updated: March 2026", 10, "Regular", C.muted, 248);
+  cy += 34;
+  // Section: What we collect
+  R(p, "S1 Bg", 16, cy, 248, 64, C.surface, 10);
+  T(p, "S1 Hdr", 28, cy + 6, "\uD83D\uDCCB What we collect", 11, "Bold", C.text, 220);
+  T(p, "S1 Body", 28, cy + 20, "\u2022 Hearing loss info & audiograms\n\u2022 Name, contact, location\n\u2022 Country, language, visa status\n\u2022 Device photos from scanner", 10, "Regular", C.muted, 220);
+  cy += 70;
+  // Section: Who sees it
+  R(p, "S2 Bg", 16, cy, 248, 60, C.surface, 10);
+  T(p, "S2 Hdr", 28, cy + 6, "\uD83D\uDC41 Who sees your data", 11, "Bold", C.text, 220);
+  T(p, "S2 Body", 28, cy + 20, "\u2022 Health data \u2192 audiologists + admin\n\u2022 Personal details \u2192 admin only\n\u2022 Donors see: device name & status\n\u2022 We never sell your data", 10, "Regular", C.muted, 220);
+  cy += 66;
+  // Section: Where stored
+  R(p, "S3 Bg", 16, cy, 248, 46, C.surface, 10);
+  T(p, "S3 Hdr", 28, cy + 6, "\uD83D\uDD12 Where it's stored", 11, "Bold", C.text, 220);
+  T(p, "S3 Body", 28, cy + 20, "\u2022 Encrypted & stored in Australia\n\u2022 Access controlled by role", 10, "Regular", C.muted, 220);
+  cy += 52;
+  // Section: Your rights
+  R(p, "S4 Bg", 16, cy, 248, 56, C.surface, 10);
+  T(p, "S4 Hdr", 28, cy + 6, "\u2696\uFE0F Your rights", 11, "Bold", C.text, 220);
+  T(p, "S4 Body", 28, cy + 20, "\u2022 See, correct, or delete your data\n\u2022 Withdraw consent anytime\n\u2022 Complain to OAIC if unhappy", 10, "Regular", C.muted, 220);
+  cy += 62;
+  // Legal basis
+  R(p, "Legal Bg", 16, cy, 248, 46, C.amberBg, 10, C.amberBorder, 1);
+  T(p, "Legal Hdr", 28, cy + 6, "\uD83D\uDCDC Legal basis", 11, "Bold", C.amberText, 220);
+  T(p, "Legal Body", 28, cy + 20, "\u2022 Australian Privacy Act 1988 (APPs)\n\u2022 Health Records Act 2001 (VIC)", 10, "Regular", C.amberText, 220);
+  cy += 52;
+  T(p, "PDF Link", 0, cy, "Download full policy (PDF)", 10, "Regular", C.primary, 280, "CENTER");
+}
+
+function screen5C(page, x, y) {
+  var p = phone(page, x, y, "5C. My Data & Rights");
+  var cy = navBar(p, 44, "My Data", true, "");
+  cy += 4;
+  T(p, "Heading", 16, cy, "Your Data & Consent", 14, "Bold", C.text, 248);
+  T(p, "Sub", 16, cy + 18, "Manage your privacy settings and data", 10, "Regular", C.muted, 248);
+  cy += 36;
+  // Active consents
+  T(p, "Consent Hdr", 16, cy, "ACTIVE CONSENT", 10, "Semi Bold", C.muted);
+  cy += 16;
+  var consents = [
+    ["\uD83C\uDFE5 Health Information", true],
+    ["\uD83D\uDC64 Personal Details", true],
+    ["\uD83D\uDCEC Communications", true],
+    ["\uD83D\uDCF8 Impact Stories", false],
+  ];
+  for (var i = 0; i < consents.length; i++) {
+    T(p, "C" + i, 16, cy + 8, consents[i][0], 12, "Regular", C.text);
+    chip(p, consents[i][1] ? 204 : 210, cy + 6, consents[i][1] ? "Active" : "Off", consents[i][1] ? C.okLight : C.chip, consents[i][1] ? C.okDark : C.muted);
+    R(p, "CD" + i, 16, cy + 28, 248, 1, C.border);
+    cy += 30;
+  }
+  T(p, "Edit Link", 168, cy, "Edit consent settings", 10, "Regular", C.primary, 96);
+  cy += 18;
+  // Your rights section
+  T(p, "Rights Hdr", 16, cy, "YOUR RIGHTS", 10, "Semi Bold", C.muted);
+  cy += 16;
+  R(p, "Rights Card", 16, cy, 248, 168, C.surface, 12, C.border, 1);
+  var rights = [
+    ["\uD83D\uDCE5 View My Data", "See everything we hold about you"],
+    ["\uD83D\uDCE4 Download My Data", "Get a copy in PDF or JSON"],
+    ["\u270F\uFE0F Correct My Info", "Update any incorrect details"],
+    ["\uD83D\uDDD1 Delete My Account", "Remove all data permanently"],
+  ];
+  for (var i = 0; i < rights.length; i++) {
+    var ry = cy + 6 + i * 42;
+    T(p, "R" + i + "Title", 28, ry, rights[i][0], 12, "Semi Bold", i === 3 ? C.err : C.text, 200);
+    T(p, "R" + i + "Sub", 28, ry + 16, rights[i][1], 10, "Regular", C.muted, 200);
+    T(p, "R" + i + "Arrow", 248, ry + 4, "\u203A", 14, "Regular", C.muted);
+    if (i < 3) R(p, "RD" + i, 28, ry + 34, 220, 1, C.border);
+  }
+  cy += 176;
+  // Contact
+  R(p, "Contact Bg", 16, cy, 248, 36, C.blueLight, 10);
+  T(p, "Contact", 0, cy + 8, "\uD83D\uDCE7 privacy@recycledsound.org", 11, "Semi Bold", C.blue, 280, "CENTER");
+  tabBar(p, 3);
+}
+
 // ─── Design System Components ─────────────────────────────────
 function buildDesignSystem(dsPage) {
   // Title
@@ -753,7 +886,7 @@ async function main() {
 
   // Title
   T(wfPage, "Title", offsetX, -80, "Recycled Sound", 36, "Extra Bold", C.primary, 600);
-  T(wfPage, "Subtitle", offsetX, -36, "Wireframes v0.1 \u2014 Hearing Aid Scanner Flow + Donor Journey", 14, "Regular", C.muted, 600);
+  T(wfPage, "Subtitle", offsetX, -36, "Wireframes v0.2 \u2014 Scanner + Donor + Recipient + Privacy & Consent", 14, "Regular", C.muted, 600);
 
   // Flow 1
   var rowY = 0;
@@ -800,8 +933,19 @@ async function main() {
   screen4B(wfPage, offsetX + 1 * (PW + GAP), pY);
   screen4C(wfPage, offsetX + 2 * (PW + GAP), pY);
 
+  // Flow 5
+  rowY = pY + 560 + RGAP;
+  T(wfPage, "F5 Title", offsetX, rowY, "Flow 5: Privacy & Consent", 24, "Bold", C.text, 900);
+  T(wfPage, "F5 Desc", offsetX, rowY + 36, "Australian Privacy Act & Victorian Health Records Act compliance. Express consent, plain-language policy, data subject rights.", 14, "Regular", C.muted, 900);
+  lY = rowY + 80; pY = lY + 24;
+  var labels5 = ["5A. DATA CONSENT", "5B. PRIVACY SUMMARY", "5C. MY DATA & RIGHTS"];
+  for (var i = 0; i < 3; i++) T(wfPage, labels5[i], offsetX + i * (PW + GAP), lY, labels5[i], 12, "Semi Bold", C.muted, PW, "CENTER");
+  screen5A(wfPage, offsetX + 0 * (PW + GAP), pY);
+  screen5B(wfPage, offsetX + 1 * (PW + GAP), pY);
+  screen5C(wfPage, offsetX + 2 * (PW + GAP), pY);
+
   figma.viewport.scrollAndZoomIntoView(wfPage.children);
-  figma.notify("\uD83C\uDFB5 Recycled Sound: 13 screens + design system generated!", { timeout: 4000 });
+  figma.notify("\uD83C\uDFB5 Recycled Sound: 16 screens + design system generated!", { timeout: 4000 });
   figma.closePlugin();
 }
 
