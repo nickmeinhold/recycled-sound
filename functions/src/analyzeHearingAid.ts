@@ -3,7 +3,11 @@ import * as admin from "firebase-admin";
 import {ImageAnnotatorClient} from "@google-cloud/vision";
 
 const vision = new ImageAnnotatorClient();
-const db = admin.firestore();
+
+/** Lazy Firestore reference — avoids calling admin.firestore() before initializeApp(). */
+function getDb() {
+  return admin.firestore();
+}
 
 interface SpecMatch {
   value: string;
@@ -68,6 +72,7 @@ export const analyzeHearingAid = functions.https.onCall(
     const ocrWords = ocrText.split(/\s+/).filter((w) => w.length > 1);
 
     // 2. Load catalog entries
+    const db = getDb();
     const catalogSnap = await db.collection("hearingAidCatalog").get();
     const catalog: CatalogEntry[] = catalogSnap.docs.map(
       (doc) => doc.data() as CatalogEntry

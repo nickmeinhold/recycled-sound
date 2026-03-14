@@ -60,12 +60,16 @@ class RsSpecRow extends StatelessWidget {
           ),
           // Edit button
           if (onEdit != null)
-            GestureDetector(
-              onTap: onEdit,
-              child: const Icon(
-                Icons.edit_outlined,
-                size: 16,
-                color: AppColors.textMuted,
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: IconButton(
+                onPressed: onEdit,
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  size: 16,
+                  color: AppColors.textMuted,
+                ),
               ),
             ),
         ],

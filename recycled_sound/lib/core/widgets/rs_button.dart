@@ -24,11 +24,15 @@ class RsButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final spinnerColor = variant == RsButtonVariant.primary
+        ? AppColors.white
+        : AppColors.primary;
+
     final child = isLoading
-        ? const SizedBox(
+        ? SizedBox(
             width: 20,
             height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+            child: CircularProgressIndicator(strokeWidth: 2, color: spinnerColor),
           )
         : icon != null
             ? Row(

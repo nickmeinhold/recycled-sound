@@ -19,11 +19,11 @@ class _SignupScreenState extends State<SignupScreen> {
   final _passwordController = TextEditingController();
   String _selectedRole = 'donor';
 
+  /// Only self-assignable roles shown during signup.
+  /// Audiologist and admin roles are assigned by an existing admin.
   static const _roles = {
     'donor': ('Donor', 'Donate hearing aids to those in need'),
     'recipient': ('Recipient', 'Apply for a donated hearing aid'),
-    'audiologist': ('Audiologist', 'Review and QA donated devices'),
-    'admin': ('Admin', 'Manage the platform'),
   };
 
   @override
