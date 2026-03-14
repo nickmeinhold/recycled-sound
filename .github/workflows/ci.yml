@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Skip CI for docs-only changes
+      - name: Check for docs-only changes
+        id: docs-check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(gh pr view ${{ github.event.pull_request.number }} --json files --jq '.files[].path')
+          else
+            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          fi
+          NON_DOCS=$(echo "$FILES" | grep -vE '\.(md|txt|LICENSE)$' || true)
+          if [ -z "$NON_DOCS" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Flutter setup and tests
+      - uses: subosito/flutter-action@v2
+        if: steps.docs-check.outputs.skip != 'true'
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        if: steps.docs-check.outputs.skip != 'true'
+        working-directory: recycled_sound
+        run: flutter pub get
+
+      - name: Analyze
+        if: steps.docs-check.outputs.skip != 'true'
+        working-directory: recycled_sound
+        run: dart analyze --fatal-infos
+
+      - name: Run tests with coverage
+        if: steps.docs-check.outputs.skip != 'true'
+        working-directory: recycled_sound
+        run: flutter test --coverage
+
+      - name: Check coverage threshold
+        if: steps.docs-check.outputs.skip != 'true'
+        working-directory: recycled_sound
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            echo "No coverage file found"
+            exit 1
+          fi
+          # Parse lcov.info for line coverage
+          LINES_HIT=$(grep -c 'DA:' coverage/lcov.info || echo 0)
+          LINES_FOUND=$(grep 'DA:' coverage/lcov.info | wc -l || echo 0)
+          LINES_COVERED=$(grep 'DA:' coverage/lcov.info | grep -v ',0$' | wc -l || echo 0)
+          if [ "$LINES_FOUND" -eq 0 ]; then
+            echo "No lines found in coverage report"
+            exit 0
+          fi
+          COVERAGE=$((LINES_COVERED * 100 / LINES_FOUND))
+          echo "Coverage: ${COVERAGE}% (${LINES_COVERED}/${LINES_FOUND} lines)"
+          if [ "$COVERAGE" -lt 80 ]; then
+            echo "Coverage ${COVERAGE}% is below threshold of 80%"
+            exit 1
+          fi
+
+      # Cloud Functions build check
+      - uses: actions/setup-node@v4
+        if: steps.docs-check.outputs.skip != 'true'
+        with:
+          node-version: 20
+
+      - name: Build Cloud Functions
+        if: steps.docs-check.outputs.skip != 'true'
+        working-directory: functions
+        run: npm ci && npm run build
