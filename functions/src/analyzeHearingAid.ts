@@ -47,14 +47,34 @@ interface CatalogEntry {
  *    - Label-only match = 70-85%
  *    - No match = returns raw labels with low confidence
  */
+/** Expected Storage URL prefix for uploaded hearing aid images. */
+const STORAGE_BUCKET = "gs://recycled-sound-app.firebasestorage.app/";
+
 export const analyzeHearingAid = functions.https.onCall(
   async (request) => {
-    const {imageUrl, userId} = request.data;
+    // Require authentication — don't trust client-supplied userId
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Must be signed in"
+      );
+    }
+    const userId = request.auth.uid;
 
-    if (!imageUrl || !userId) {
+    const {imageUrl} = request.data;
+
+    if (!imageUrl) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "imageUrl and userId are required"
+        "imageUrl is required"
+      );
+    }
+
+    // Validate URL points to our Storage bucket to prevent SSRF
+    if (typeof imageUrl !== "string" || !imageUrl.startsWith(STORAGE_BUCKET)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "imageUrl must be a Firebase Storage URL in the project bucket"
       );
     }
 

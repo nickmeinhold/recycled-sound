@@ -32,29 +32,25 @@ export const setUserRole = functions.https.onCall(
       );
     }
 
-    // Elevated roles require admin privileges
+    // Elevated roles require admin privileges — no exceptions
     if (role === "admin" || role === "audiologist") {
       const callerRecord = await admin.auth().getUser(callerUid);
       const callerRole = callerRecord.customClaims?.role;
-      if (callerRole !== "admin" && callerUid !== targetUid) {
+      if (callerRole !== "admin") {
         throw new functions.https.HttpsError(
           "permission-denied",
-          "Only admins can assign audiologist or admin roles"
+          "Only admins can assign audiologist or admin roles. " +
+            "Bootstrap the first admin via Firebase Console or Admin SDK."
         );
       }
     }
 
     // Self-assignment: only donor/recipient allowed
     if (callerUid === targetUid && (role === "admin" || role === "audiologist")) {
-      // Allow first-time setup (no existing role) — bootstrap the first admin
-      const userRecord = await admin.auth().getUser(callerUid);
-      const existingRole = userRecord.customClaims?.role;
-      if (existingRole) {
-        throw new functions.https.HttpsError(
-          "permission-denied",
-          "Cannot self-assign elevated roles"
-        );
-      }
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Cannot self-assign elevated roles"
+      );
     }
 
     // Set custom claim
