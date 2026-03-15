@@ -23,25 +23,6 @@
           "other_platform_oauth_client": []
         }
       }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:666059041296:android:3322a96d84ee611250f895",
-        "android_client_info": {
-          "package_name": "com.recycledsound.recycled_sound"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyBS2fzhUTysG8f3sJE-VSX-EQGGj5AFSEM"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
     }
   ],
   "configuration_version": "1"
