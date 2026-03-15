@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "666059041296",
+    "project_id": "recycled-sound-app",
+    "storage_bucket": "recycled-sound-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:666059041296:android:edb9a262bff4dae650f895",
+        "android_client_info": {
+          "package_name": "co.enspyr.recycledsound"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBS2fzhUTysG8f3sJE-VSX-EQGGj5AFSEM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,4 +1,4 @@
-package com.recycledsound.recycled_sound
+package co.enspyr.recycledsound
 
 import io.flutter.embedding.android.FlutterActivity
 
