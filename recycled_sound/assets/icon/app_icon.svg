@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2A7D5F"/>
+      <stop offset="100%" stop-color="#1F5E47"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+
+  <g transform="translate(512, 512)" fill="#FFFFFF">
+
+    <!-- ARROW 1: arc from top going clockwise, arrowhead at bottom-right -->
+    <g opacity="0.93">
+      <path d="
+        M 0,-295
+        A 295,295 0 0,1 220,130
+        L 180,107
+        A 245,245 0 0,0 0,-245
+        Z
+      "/>
+      <!-- Big bold arrowhead -->
+      <polygon points="220,130 135,110 175,210"/>
+    </g>
+
+    <!-- ARROW 2: rotated 120° -->
+    <g opacity="0.93" transform="rotate(120)">
+      <path d="
+        M 0,-295
+        A 295,295 0 0,1 220,130
+        L 180,107
+        A 245,245 0 0,0 0,-245
+        Z
+      "/>
+      <polygon points="220,130 135,110 175,210"/>
+    </g>
+
+    <!-- ARROW 3: rotated 240° -->
+    <g opacity="0.93" transform="rotate(240)">
+      <path d="
+        M 0,-295
+        A 295,295 0 0,1 220,130
+        L 180,107
+        A 245,245 0 0,0 0,-245
+        Z
+      "/>
+      <polygon points="220,130 135,110 175,210"/>
+    </g>
+
+    <!-- Center: sound wave ripples -->
+    <circle cx="0" cy="0" r="30" opacity="0.95"/>
+    <circle cx="0" cy="0" r="72" fill="none" stroke="#FFFFFF" stroke-width="16" opacity="0.50"/>
+    <circle cx="0" cy="0" r="118" fill="none" stroke="#FFFFFF" stroke-width="11" opacity="0.27"/>
+    <circle cx="0" cy="0" r="162" fill="none" stroke="#FFFFFF" stroke-width="7" opacity="0.13"/>
+
+  </g>
+</svg>

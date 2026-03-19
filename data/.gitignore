@@ -1,0 +1,6 @@
+# Large data files — don't commit to git
+images/
+chroma_db/
+raw/
+processed/
+__pycache__/
