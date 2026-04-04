@@ -3,7 +3,7 @@
 ## What This Is
 Recycled Sound is a community app that collects, services, and redistributes donated hearing aids to people who can't afford them — primarily refugees, asylum seekers, and low-income residents in Greater Dandenong, Victoria.
 
-The hero feature is a **Google Lens-style scanner** that identifies hearing aid brand, model, specs, and capabilities from a photo.
+The hero feature is a **Google Lens-style scanner** that identifies hearing aid brand, model, specs, and capabilities from a photo. The scanner is a **human-in-the-loop tool** — it pre-fills what it can, then the audiologist confirms/corrects.
 
 ## Partners
 - **Rotary Club of Springvale City** — applicant org, volunteers, governance
@@ -32,6 +32,48 @@ The hero feature is a **Google Lens-style scanner** that identifies hearing aid 
 
 Brands on register: Unitron, Phonak, Oticon, Signia, GN Resound, Beltone, Widex, Blamey & Saunders.
 
+## Scanner Pipeline
+
+### Architecture
+Hybrid **CLIP visual search** + **Google Vision API** (OCR + labels) → **on-device fusion engine**.
+
+Two Cloud Functions fire in parallel:
+- `clip_encode` (Python, ViT-B-32 laion2b) → 512-dim embedding → cosine similarity against 1,927 pre-computed embeddings
+- `analyzeHearingAid` (TypeScript) → Vision API label + text detection → catalog matching
+
+Results fused on-device by `scan_fusion.dart` using a confidence matrix.
+
+### E2E Test Results (2026-03-22)
+Tested with 12 real photos from Seray's device register. Key findings:
+- **OCR is the strongest signal** — correctly ID'd Oticon Nera2 Pro and Unitron Moxi S-R from device body text
+- **CLIP visual search has a domain gap** — avg similarity 0.518 (all LOW). Product shots ≠ real-world hand-held photos
+- **Fuzzy matching essential** — OCR reads "oricon" not "oticon", "movi" not "moxi". Levenshtein ≤ 1 catches these
+
+### Audiologist's 7-Field Model (from Seray)
+What the scanner should capture per device:
+1. **Make** — AI via OCR ✓
+2. **Model** — AI via OCR ✓
+3. **Style** (BTE/RIC/ITE/CIC) — needs human input
+4. **Tubing** (slim/standard/none) — needs human input (NEW field, not yet in schema)
+5. **Battery or Rechargeable** — needs human confirmation
+6. **Battery size** (10/13/312/675) — potential AI task (battery door shapes are visually distinct)
+7. **Colour** — present swatches for human to confirm
+
+### Test Harness
+`data/test_pipeline.py` — runs photos through both CLIP and Vision API locally, compares results. Usage:
+```
+python3 data/test_pipeline.py /path/to/photo.jpg        # single photo
+python3 data/test_pipeline.py /path/to/folder/           # batch mode
+python3 data/test_pipeline.py /path/to/folder/ --json    # machine-readable
+```
+Requires: `google-cloud-vision`, `open_clip`, `torch`, `chromadb`. Uses ADC credentials — set `quota_project_id` to `recycled-sound-app`.
+
+### Next Steps for Scanner
+- [ ] Multi-photo flow: overview → text close-up → (battery door?) → confirmation screen
+- [ ] Add tubing field to device schema
+- [ ] Battery door visual classifier (4 classes, distinct shapes)
+- [ ] Address CLIP domain gap (data augmentation or fine-tuning)
+
 ## What's Been Built
 
 ### Wireframes (13 screens, 4 flows) — completed 2026-03-12
@@ -47,6 +89,7 @@ Brands on register: Unitron, Phonak, Oticon, Signia, GN Resound, Beltone, Widex,
 
 ### Deliverables
 - **HTML wireframes**: https://nickmeinhold.github.io/recycled-sound/
+- **Privacy policy**: `docs/privacy.html` (also at project root)
 - **Figma file**: https://www.figma.com/design/b86mwNrRnm5lbxawcVZb64/Recycled-Sound
 - **Figma plugin**: `figma-plugin/` — run in Figma Desktop to regenerate all screens
 - **GitHub repo**: https://github.com/nickmeinhold/recycled-sound
@@ -96,11 +139,11 @@ Brands on register: Unitron, Phonak, Oticon, Signia, GN Resound, Beltone, Widex,
 - Large grants (up to $50k) opening 2027
 - Total project value with in-kind: $27,240
 
-## Way Forward (as of 2026-03-13)
-1. **Designer hired** to take wireframes → hi-fi designs in Figma
-2. **Share with Seray** for feedback on scanner flow and recipient needs collection
-3. **Lock MVP scope** — Scanner + Donor Listing + Recipient App + Admin Dashboard
-4. **Tech stack decision** — Flutter (Dart MCP available), Firebase/Supabase backend
-5. **AI model** for hearing aid photo recognition — fine-tuned vision model against major brands
-6. **Build scanner flow first** — hero feature, most technically interesting
-7. **Grant outcome June 2026** shapes resourcing; working app strengthens 2027 large grant bid
+## Way Forward (as of 2026-03-23)
+1. **Scanner pipeline tested** — OCR works, CLIP has domain gap, fuzzy matching added
+2. **Seray's feedback incorporated** — 7-field audiologist model, multi-photo flow confirmed
+3. **Next: multi-photo capture flow** — overview → text → battery door → confirmation
+4. **Next: add tubing field** to device schema and scan result model
+5. **Next: battery door classifier** — 4-class visual problem (sizes 10/13/312/675)
+6. **Grant outcome June 2026** shapes resourcing; working app strengthens 2027 large grant bid
+7. **TestFlight** — v0.1.0 live with external testers; v0.2.0 (build 3) waiting for Beta App Review since Mar 31

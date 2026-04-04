@@ -1,8 +1,16 @@
 {
-  "functions": {
-    "source": "functions",
-    "predeploy": ["npm --prefix functions run build"]
-  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "vision",
+      "predeploy": ["npm --prefix functions run build"]
+    },
+    {
+      "source": "functions-clip",
+      "codebase": "clip",
+      "runtime": "python312"
+    }
+  ],
   "firestore": {
     "rules": "functions/src/firestore.rules",
     "indexes": "firestore.indexes.json"

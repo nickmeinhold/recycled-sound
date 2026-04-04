@@ -51,6 +51,7 @@ interface CatalogEntry {
 const STORAGE_BUCKET = "gs://recycled-sound-app.firebasestorage.app/";
 
 export const analyzeHearingAid = functions.https.onCall(
+  {region: "australia-southeast1"},
   async (request) => {
     // Require authentication — don't trust client-supplied userId
     if (!request.auth) {
@@ -115,7 +116,14 @@ export const analyzeHearingAid = functions.https.onCall(
     };
     await scanRef.set(scanDoc);
 
-    return {scanId: scanRef.id, ...result, rawLabels: labels};
+    return {
+      scanId: scanRef.id,
+      ...result,
+      rawLabels: labels,
+      // Raw signals for client-side fusion engine
+      rawOcrText: ocrText,
+      rawOcrWords: ocrWords,
+    };
   }
 );
 

@@ -57,6 +57,12 @@ class ScanResultNotifier extends Notifier<ScanResult> {
   @override
   ScanResult build() => ScanResult.mock();
 
+  /// Set the scan result from the real pipeline.
+  void setResult(ScanResult result) {
+    _corrections.clear();
+    state = result;
+  }
+
   /// Update a single spec field and record the correction with full context.
   void updateField(String fieldName, String newValue) {
     final current = state;

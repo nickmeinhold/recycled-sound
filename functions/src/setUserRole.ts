@@ -14,6 +14,7 @@ type Role = (typeof VALID_ROLES)[number];
  * Users can self-assign 'donor' or 'recipient' during signup.
  */
 export const setUserRole = functions.https.onCall(
+  {region: "australia-southeast1"},
   async (request) => {
     const {targetUid, role} = request.data;
     const callerUid = request.auth?.uid;

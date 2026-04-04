@@ -1,7 +1,7 @@
 name: recycled_sound
 description: Community app for collecting, servicing, and redistributing donated hearing aids.
 publish_to: 'none'
-version: 0.1.0+2
+version: 0.2.1+4
 
 environment:
   sdk: ^3.11.1
@@ -35,3 +35,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/device_db.bin
+    - assets/device_catalog.json

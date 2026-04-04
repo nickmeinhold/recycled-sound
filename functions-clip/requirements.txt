@@ -1,0 +1,6 @@
+firebase-admin>=6.0.0
+firebase-functions>=0.4.0
+open-clip-torch>=2.24.0
+torch>=2.0.0
+Pillow>=10.0.0
+numpy>=1.24.0
