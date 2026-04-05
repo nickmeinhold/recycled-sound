@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/home/presentation/home_screen.dart';
-import '../../features/scanner/presentation/camera_screen.dart';
+import '../../features/scanner/presentation/live_scanner_screen.dart';
 import '../../features/scanner/presentation/analysing_screen.dart';
 import '../../features/scanner/presentation/results_screen.dart';
 import '../../features/devices/presentation/device_list_screen.dart';
@@ -40,7 +40,7 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/scan',
       parentNavigatorKey: _rootNavigatorKey,
-      builder: (context, state) => const CameraScreen(),
+      builder: (context, state) => const LiveScanScreen(),
     ),
     GoRoute(
       path: '/scan/analysing',

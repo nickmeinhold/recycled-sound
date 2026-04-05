@@ -42,11 +42,29 @@ class CameraScreen extends StatelessWidget {
                   // Placeholder — will show live camera feed in Phase 2
                   Container(color: Colors.grey[900]),
                   const ScanFrameOverlay(),
+                  // OCR hint icon above the frame
                   Positioned(
-                    bottom: 48,
+                    top: 48,
+                    child: Icon(
+                      Icons.text_fields,
+                      color: AppColors.white.withValues(alpha: 0.5),
+                      size: 20,
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 56,
                     child: Text(
-                      'Position the hearing aid inside the frame',
-                      style: AppTypography.bodySmall.copyWith(color: AppColors.white),
+                      'Hold close with brand name visible',
+                      style: AppTypography.body.copyWith(color: AppColors.white),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 36,
+                    child: Text(
+                      'Tip: text on the device helps identify it faster',
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.white.withValues(alpha: 0.6),
+                      ),
                     ),
                   ),
                 ],
