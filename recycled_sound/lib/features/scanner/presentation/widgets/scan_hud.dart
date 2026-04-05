@@ -3,16 +3,18 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 
-/// Bottom HUD panel for the live scanner, showing detected features
-/// and guiding the user through the scan.
+/// Bottom HUD panel for the live scanner.
 ///
-/// Visual treatment: frosted dark panel with monospace readout,
-/// inspired by heads-up displays but using our teal/green palette.
+/// Shows detected features with confidence labels, cross-reference
+/// status, and contextual guidance. Visual treatment: frosted dark
+/// panel with monospace readout.
 class ScanHud extends StatelessWidget {
   const ScanHud({
     super.key,
     required this.detectedBrand,
     required this.detectedModel,
+    required this.brandConfidence,
+    required this.crossRefText,
     required this.showHint,
     required this.onReview,
     required this.onFallback,
@@ -21,13 +23,14 @@ class ScanHud extends StatelessWidget {
   final String? detectedBrand;
   final String? detectedModel;
 
-  /// Show "try holding closer" hint after timeout.
+  /// Confidence label for brand match: "EXACT" or "FUZZY ≤1".
+  final String? brandConfidence;
+
+  /// Transient cross-reference text, e.g. "23 OTICON DEVICES IN DATABASE".
+  final String? crossRefText;
+
   final bool showHint;
-
-  /// Called when the user taps "Review Results".
   final VoidCallback onReview;
-
-  /// Called when the user taps the fallback "use photo instead" link.
   final VoidCallback onFallback;
 
   bool get _hasDetections => detectedBrand != null || detectedModel != null;
@@ -49,12 +52,29 @@ class ScanHud extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Cross-reference flash
+          if (crossRefText != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                crossRefText!,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0x88FFFFFF),
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ),
+
           // Detection readout
           if (_hasDetections) ...[
             _FeatureRow(
               field: 'MAKE',
               value: detectedBrand,
               detected: detectedBrand != null,
+              confidence: brandConfidence,
             ),
             const SizedBox(height: 4),
             _FeatureRow(
@@ -135,17 +155,20 @@ class _FeatureRow extends StatelessWidget {
     required this.field,
     required this.value,
     required this.detected,
+    this.confidence,
   });
 
   final String field;
   final String? value;
   final bool detected;
 
+  /// Optional confidence label, e.g. "EXACT" or "FUZZY ≤1".
+  final String? confidence;
+
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Checkmark or scanning indicator
         Icon(
           detected ? Icons.check_circle : Icons.radio_button_unchecked,
           size: 16,
@@ -154,7 +177,6 @@ class _FeatureRow extends StatelessWidget {
               : AppColors.white.withValues(alpha: 0.3),
         ),
         const SizedBox(width: 8),
-        // Field name
         SizedBox(
           width: 52,
           child: Text(
@@ -168,7 +190,6 @@ class _FeatureRow extends StatelessWidget {
             ),
           ),
         ),
-        // Value or placeholder
         Expanded(
           child: Text(
             value ?? '- - -',
@@ -176,13 +197,30 @@ class _FeatureRow extends StatelessWidget {
               fontFamily: 'monospace',
               fontSize: 13,
               fontWeight: detected ? FontWeight.w600 : FontWeight.w400,
-              color: detected
-                  ? AppColors.success
-                  : const Color(0x44FFFFFF),
+              color: detected ? AppColors.success : const Color(0x44FFFFFF),
               letterSpacing: 0.3,
             ),
           ),
         ),
+        // Confidence badge
+        if (detected && confidence != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(3),
+              color: const Color(0x33FFFFFF),
+            ),
+            child: Text(
+              confidence!,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: Color(0x99FFFFFF),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
       ],
     );
   }
