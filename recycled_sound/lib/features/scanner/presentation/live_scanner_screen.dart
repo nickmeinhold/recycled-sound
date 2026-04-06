@@ -10,8 +10,13 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+
 import '../data/brand_matcher.dart';
+import 'widgets/capture_stack.dart';
 import 'widgets/feature_overlay_painter.dart';
+import 'widgets/progress_rail.dart';
 import 'widgets/scan_hud.dart';
 
 /// The scanner's lifecycle phases.
@@ -62,6 +67,11 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   // ── Completion overlay ────────────────────────────────────────────────
   bool _showCompletion = false;
   bool _completionFired = false;
+
+  // ── Captures & upload ──────────────────────────────────────────────
+  final List<CapturedFeature> _captures = [];
+  final List<SnapEvent> _snapEvents = [];
+  bool _isCapturing = false;
 
   // ── Timing ────────────────────────────────────────────────────────────
   Timer? _hintTimer;
@@ -214,6 +224,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               _brandConfidence = result.confidenceLabel;
               HapticFeedback.mediumImpact();
               _showCrossReference(result.displayName);
+              _captureSnapshot('MAKE', result.displayName, line.boundingBox);
               wasMatched = true;
             }
           } else {
@@ -240,6 +251,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               ));
               _detectedModel = model;
               HapticFeedback.mediumImpact();
+              _captureSnapshot('MODEL', model, line.boundingBox);
               wasMatched = true;
             }
           }
@@ -306,6 +318,102 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       allBytes.putUint8List(plane.bytes);
     }
     return allBytes.done().buffer.asUint8List();
+  }
+
+  // ── Snapshot capture & background upload ────────────────────────────
+
+  /// Capture a still frame and upload it in the background.
+  /// Camera stream pauses briefly (~200ms) then resumes.
+  Future<void> _captureSnapshot(String field, String label, Rect bbox) async {
+    if (_isCapturing || _cameraController == null) return;
+    _isCapturing = true;
+
+    // Record snap event for the ripple animation
+    _snapEvents.add(SnapEvent(boundingBox: bbox, label: label));
+
+    // Create the capture entry
+    final capture = CapturedFeature(
+      id: '${field}_${DateTime.now().millisecondsSinceEpoch}',
+      label: label,
+      field: field,
+    );
+    setState(() => _captures.add(capture));
+
+    try {
+      // Brief stream pause to take a high-quality still
+      await _cameraController!.stopImageStream();
+      final xFile = await _cameraController!.takePicture();
+      capture.imagePath = xFile.path;
+
+      // Resume stream immediately
+      if (mounted && _cameraController != null) {
+        await _cameraController!.startImageStream(_onCameraFrame);
+      }
+
+      // Upload in background while camera keeps scanning
+      _uploadInBackground(capture);
+    } catch (_) {
+      // If capture fails, just resume the stream
+      if (mounted && _cameraController != null) {
+        try {
+          await _cameraController!.startImageStream(_onCameraFrame);
+        } catch (_) {}
+      }
+    } finally {
+      _isCapturing = false;
+    }
+  }
+
+  /// Upload a captured image to Firebase Storage with progress tracking.
+  Future<void> _uploadInBackground(CapturedFeature capture) async {
+    if (capture.imagePath == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => capture.state = CaptureState.done);
+      return;
+    }
+
+    setState(() => capture.state = CaptureState.uploading);
+
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance
+          .ref('scans/${user.uid}/${timestamp}_${capture.field}.jpg');
+
+      final uploadTask = ref.putFile(File(capture.imagePath!));
+
+      // Track upload progress
+      uploadTask.snapshotEvents.listen((snapshot) {
+        if (!mounted) return;
+        final progress =
+            snapshot.bytesTransferred / snapshot.totalBytes;
+        setState(() => capture.uploadProgress = progress);
+      });
+
+      await uploadTask;
+      if (!mounted) return;
+
+      setState(() => capture.state = CaptureState.done);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => capture.state = CaptureState.error);
+    }
+  }
+
+  /// Overall upload progress across all captures.
+  double get _overallProgress {
+    if (_captures.isEmpty) return 0.0;
+    var total = 0.0;
+    for (final c in _captures) {
+      total += switch (c.state) {
+        CaptureState.done => 1.0,
+        CaptureState.uploading => c.uploadProgress,
+        CaptureState.error => 1.0,
+        _ => 0.0,
+      };
+    }
+    return total / _captures.length;
   }
 
   // ── Cross-reference flash ─────────────────────────────────────────────
@@ -428,8 +536,9 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               ),
             ),
 
-            // Feature overlay (green + amber boxes)
-            if (_phase != _ScanPhase.booting && _liveDetections.isNotEmpty)
+            // Feature overlay (green + amber boxes + snap ripples)
+            if (_phase != _ScanPhase.booting &&
+                (_liveDetections.isNotEmpty || _snapEvents.isNotEmpty))
               Positioned.fill(
                 child: AnimatedBuilder(
                   animation: _pulseController,
@@ -440,9 +549,30 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                       previewSize: MediaQuery.of(context).size,
                       sensorOrientation: _camera?.sensorOrientation ?? 0,
                       animationValue: _pulseController.value,
+                      snapEvents: _snapEvents,
                     ),
                   ),
                 ),
+              ),
+
+            // Progress rail (left edge)
+            if (_captures.isNotEmpty)
+              Positioned(
+                left: 12,
+                top: MediaQuery.of(context).padding.top + 60,
+                child: ProgressRail(
+                  progress: _overallProgress,
+                  captureCount: _captures.length,
+                  totalExpected: 2, // brand + model
+                ),
+              ),
+
+            // Capture stack (right edge)
+            if (_captures.isNotEmpty)
+              Positioned(
+                right: 12,
+                top: MediaQuery.of(context).padding.top + 60,
+                child: CaptureStack(captures: _captures),
               ),
 
             // Completion overlay

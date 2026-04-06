@@ -21,6 +21,20 @@ class TextDetection {
   final DetectionType type;
 }
 
+/// A snap event — records when and where a feature was first detected,
+/// so the painter can draw the trailing-border capture effect.
+class SnapEvent {
+  SnapEvent({required this.boundingBox, required this.label})
+      : timestamp = DateTime.now();
+
+  final Rect boundingBox;
+  final String label;
+  final DateTime timestamp;
+
+  /// Milliseconds since the snap fired.
+  int get ageMs => DateTime.now().difference(timestamp).inMilliseconds;
+}
+
 /// Paints overlays on detected text regions:
 /// - **Matched**: green corner brackets with label (brand/model identified)
 /// - **Ambient**: dim amber brackets (scanner is reading but no match yet)
@@ -34,6 +48,7 @@ class FeatureOverlayPainter extends CustomPainter {
     required this.previewSize,
     required this.sensorOrientation,
     required this.animationValue,
+    this.snapEvents = const [],
   });
 
   final List<TextDetection> detections;
@@ -44,12 +59,23 @@ class FeatureOverlayPainter extends CustomPainter {
   /// 0.0–1.0 pulsing animation for the brackets.
   final double animationValue;
 
+  /// Active snap events — draws trailing borders for captures in progress.
+  final List<SnapEvent> snapEvents;
+
   // Colors
   static const _matchedColor = Color(0xFF10B981); // success green
   static const _ambientColor = Color(0xFFD97706); // warm amber
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Draw snap ripple effects (underneath everything)
+    for (final snap in snapEvents) {
+      final age = snap.ageMs;
+      if (age > 500) continue; // expire after 500ms
+      final rect = _transformRect(snap.boundingBox, size);
+      _drawSnapRipple(canvas, rect, age / 500.0);
+    }
+
     if (detections.isEmpty) return;
 
     // Draw ambient detections first (underneath)
@@ -90,6 +116,24 @@ class FeatureOverlayPainter extends CustomPainter {
       rect.right * scale + offsetX,
       rect.bottom * scale + offsetY,
     );
+  }
+
+  /// Draw expanding ripple brackets — 3 trailing copies at increasing scale,
+  /// each fading as the animation progresses. Like a radar ping.
+  void _drawSnapRipple(Canvas canvas, Rect rect, double progress) {
+    for (var i = 1; i <= 3; i++) {
+      final expand = i * 4.0 * progress; // pixels of expansion
+      final opacity = (1.0 - progress) * (1.0 - i * 0.25); // fade with time + trail depth
+      if (opacity <= 0) continue;
+
+      final paint = Paint()
+        ..color = _matchedColor.withValues(alpha: opacity * 0.8)
+        ..strokeWidth = 2.0 - (i * 0.4) // thinner trails
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      _drawCorners(canvas, rect.inflate(4 + expand), paint);
+    }
   }
 
   void _drawMatchedBrackets(Canvas canvas, Rect rect) {
@@ -163,5 +207,7 @@ class FeatureOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant FeatureOverlayPainter old) =>
-      detections != old.detections || animationValue != old.animationValue;
+      detections != old.detections ||
+      animationValue != old.animationValue ||
+      snapEvents.length != old.snapEvents.length;
 }
