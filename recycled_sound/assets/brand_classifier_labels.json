@@ -1,0 +1,18 @@
+{
+  "classes": [
+    "Beltone",
+    "Bernafon",
+    "Oticon",
+    "Philips",
+    "Phonak",
+    "ReSound",
+    "Signia",
+    "Starkey",
+    "Unitron",
+    "Widex"
+  ],
+  "num_classes": 10,
+  "input_size": 224,
+  "quantized": true,
+  "quantization": "float16"
+}

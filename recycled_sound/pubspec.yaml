@@ -24,6 +24,8 @@ dependencies:
   camera: ^0.11.1
   image_picker: ^1.1.2
   google_mlkit_text_recognition: ^0.15.1
+  tflite_flutter: ^0.11.0
+  image: ^4.5.3
 
 dev_dependencies:
   flutter_test:
@@ -39,3 +41,5 @@ flutter:
   assets:
     - assets/device_db.bin
     - assets/device_catalog.json
+    - assets/brand_classifier.tflite
+    - assets/brand_classifier_labels.json
