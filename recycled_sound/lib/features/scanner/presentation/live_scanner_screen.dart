@@ -13,7 +13,9 @@ import '../../../core/theme/app_typography.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
+import '../data/brand_classifier.dart';
 import '../data/brand_matcher.dart';
+import '../data/colour_classifier.dart';
 import 'widgets/capture_stack.dart';
 import 'widgets/feature_overlay_painter.dart';
 import 'widgets/progress_rail.dart';
@@ -47,6 +49,9 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   final _textRecognizer = TextRecognizer();
   bool _isProcessing = false;
 
+  // ── On-device brand classifier (EfficientNet-B0, TFLite) ────────────
+  final _brandClassifier = BrandClassifier();
+
   // ── Detection state ───────────────────────────────────────────────────
   String? _detectedBrand;
   String? _detectedModel;
@@ -67,6 +72,13 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   // ── Completion overlay ────────────────────────────────────────────────
   bool _showCompletion = false;
   bool _completionFired = false;
+
+  // ── Colour detection ─────────────────────────────────────────────────
+  String? _detectedColour;
+  Color? _detectedColourRgb;
+  double _colourConfidence = 0.0;
+  bool _colourConfirmed = false;
+  final ColourStabiliser _colourStabiliser = ColourStabiliser();
 
   // ── Captures & upload ──────────────────────────────────────────────
   final List<CapturedFeature> _captures = [];
@@ -98,6 +110,11 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
     _runBootSequence();
     _initCamera();
+    // Pre-load model during boot sequence — catch errors so it doesn't
+    // crash the app if the TFLite runtime is incompatible
+    _brandClassifier.load().catchError((e) {
+      debugPrint('SCANNER: brand classifier failed to load: $e');
+    });
 
     _hintTimer = Timer(const Duration(seconds: 15), () {
       if (_detectedBrand == null && mounted) {
@@ -115,6 +132,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     _pulseController.dispose();
     _stopCamera();
     _textRecognizer.close();
+    _brandClassifier.dispose();
     super.dispose();
   }
 
@@ -158,10 +176,30 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       if (cameras.isEmpty) throw Exception('No cameras available');
       if (_disposed) return;
 
+      // Log all available cameras to find the ultra-wide (macro-capable)
+      for (final cam in cameras) {
+        debugPrint('SCANNER: camera: ${cam.name}, '
+            'direction=${cam.lensDirection}, '
+            'sensor=${cam.sensorOrientation}');
+      }
+
+      // On iPhone 13 Pro+, the ultra-wide back camera supports macro (2cm focus).
+      // The main wide camera can't focus closer than ~15cm.
+      // Try to find the ultra-wide (typically the second back-facing camera).
+      final backCameras = cameras
+          .where((c) => c.lensDirection == CameraLensDirection.back)
+          .toList();
+      debugPrint('SCANNER: ${backCameras.length} back cameras found');
+
+      // Use the main wide camera for live preview.
+      // The neural net doesn't need macro focus — it identifies brands
+      // from visual appearance at normal viewing distance.
+      // cameras.first is the default back camera (main wide lens).
       _camera = cameras.first;
+      debugPrint('SCANNER: selected camera: ${_camera!.name}');
       _cameraController = CameraController(
         _camera!,
-        ResolutionPreset.medium,
+        ResolutionPreset.high,
         enableAudio: false,
         imageFormatGroup: Platform.isIOS
             ? ImageFormatGroup.bgra8888
@@ -170,6 +208,16 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
       await _cameraController!.initialize();
       if (_disposed) return;
+
+      // Enable continuous autofocus with centre focus point.
+      // setFocusPoint tells the camera to prioritise the centre of frame,
+      // which helps it lock focus on the hearing aid.
+      try {
+        await _cameraController!.setFocusMode(FocusMode.auto);
+        await _cameraController!.setFocusPoint(const Offset(0.5, 0.5));
+      } catch (e) {
+        debugPrint('SCANNER: focus setup: $e');
+      }
 
       await _cameraController!.startImageStream(_onCameraFrame);
       setState(() => _cameraReady = true);
@@ -188,7 +236,16 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
   // ── Frame processing ──────────────────────────────────────────────────
 
+  int _frameCount = 0;
+
   void _onCameraFrame(CameraImage image) {
+    _frameCount++;
+    if (_frameCount == 1 || _frameCount % 100 == 0) {
+      debugPrint('SCANNER: frame #$_frameCount received '
+          '(${image.width}x${image.height}, format=${image.format.group}, '
+          'raw=${image.format.raw}, planes=${image.planes.length}, '
+          'sensor=${_camera?.sensorOrientation})');
+    }
     if (_isProcessing || _disposed) return;
     _isProcessing = true;
     _processFrame(image).whenComplete(() => _isProcessing = false);
@@ -196,11 +253,43 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
   Future<void> _processFrame(CameraImage image) async {
     try {
+      // Colour sampling — runs on raw bytes, sub-millisecond.
+      // Runs before ML Kit so colour updates even on frames where OCR is slow.
+      if (Platform.isIOS &&
+          image.planes.isNotEmpty &&
+          !_colourConfirmed) {
+        final sampled = ColourClassifier.sampleFromBgra8888(
+          bytes: image.planes[0].bytes,
+          width: image.width,
+          height: image.height,
+          bytesPerRow: image.planes[0].bytesPerRow,
+        );
+        final match = ColourClassifier.classify(sampled);
+        _colourStabiliser.push(match.name, match.reference);
+      }
+
       final inputImage = _buildInputImage(image);
-      if (inputImage == null) return;
+      if (inputImage == null) {
+        debugPrint('SCANNER: _buildInputImage returned null — frame skipped');
+        return;
+      }
 
       final recognizedText = await _textRecognizer.processImage(inputImage);
       if (_disposed || !mounted) return;
+
+      // Debug: log what ML Kit sees
+      if (recognizedText.blocks.isEmpty) {
+        if (_frameCount % 50 == 0) {
+          debugPrint('SCANNER: ML Kit returned 0 blocks (frame #$_frameCount)');
+        }
+      }
+      if (recognizedText.blocks.isNotEmpty) {
+        final texts = recognizedText.blocks
+            .expand((b) => b.lines)
+            .map((l) => l.text)
+            .join(' | ');
+        debugPrint('SCANNER: ML Kit found ${recognizedText.blocks.length} blocks: $texts');
+      }
 
       final detections = <TextDetection>[];
 
@@ -211,8 +300,45 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
           bool wasMatched = false;
 
-          // Try brand matching
-          if (_detectedBrand == null) {
+          // Log every text line ML Kit reads (throttled)
+          if (_frameCount % 30 == 0) {
+            final modelCheck = BrandMatcher.matchModelAnyBrand(text);
+            final brandCheck = BrandMatcher.matchBrandDetailed(text);
+            debugPrint('SCANNER: text="$text" '
+                'modelMatch=${modelCheck != null ? "${modelCheck.brand}/${modelCheck.model}" : "none"} '
+                'brandMatch=${brandCheck?.displayName ?? "none"}');
+          }
+
+          // Model-first detection: check if text matches a known model
+          // from ANY brand. This handles cases where the model name is
+          // visible but the brand name isn't (e.g., "moxi2 kiss" → Unitron).
+          if (_detectedModel == null && !wasMatched) {
+            final reverse = BrandMatcher.matchModelAnyBrand(text);
+            if (reverse != null) {
+              // Model found — also sets brand if not already detected
+              detections.add(TextDetection(
+                boundingBox: line.boundingBox,
+                label: 'MODEL: ${reverse.model}',
+                type: DetectionType.matched,
+              ));
+              _detectedModel = reverse.model;
+              HapticFeedback.mediumImpact();
+              _captureSnapshot('MODEL', reverse.model, line.boundingBox);
+              wasMatched = true;
+
+              if (_detectedBrand == null) {
+                // Infer brand from model
+                _detectedBrand = reverse.brand;
+                _brandConfidence = 'FROM MODEL';
+                HapticFeedback.mediumImpact();
+                _showCrossReference(reverse.brand);
+                // No separate snapshot for brand — the model capture covers it
+              }
+            }
+          }
+
+          // Try brand matching (only if model-first didn't already find it)
+          if (_detectedBrand == null && !wasMatched) {
             final result = BrandMatcher.matchBrandDetailed(text);
             if (result != null) {
               detections.add(TextDetection(
@@ -227,7 +353,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               _captureSnapshot('MAKE', result.displayName, line.boundingBox);
               wasMatched = true;
             }
-          } else {
+          } else if (_detectedBrand != null && !wasMatched) {
             // Brand already found — still highlight it
             final result = BrandMatcher.matchBrand(text);
             if (result != null) {
@@ -240,7 +366,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
             }
           }
 
-          // Try model matching
+          // Try model matching against known brand (if brand found first)
           if (_detectedBrand != null && _detectedModel == null && !wasMatched) {
             final model = BrandMatcher.matchModel(text, _detectedBrand!);
             if (model != null) {
@@ -284,22 +410,62 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         if (detections.any((d) => d.type == DetectionType.matched)) {
           _showHint = false;
         }
+        // Update colour — show immediately, confidence builds over frames
+        if (!_colourConfirmed) {
+          _detectedColour = _colourStabiliser.leadingColour;
+          _detectedColourRgb = _colourStabiliser.leadingRgb;
+          _colourConfidence = _colourStabiliser.confidence;
+
+          // Auto-confirm once stabiliser reaches consensus
+          if (_colourStabiliser.isStable && !_colourConfirmed) {
+            _colourConfirmed = true;
+            HapticFeedback.lightImpact();
+            _captures.add(CapturedFeature(
+              id: 'COLOUR_${DateTime.now().millisecondsSinceEpoch}',
+              label: _detectedColour!,
+              field: 'COLOUR',
+            )..state = CaptureState.done);
+
+            // Colour locked → auto-capture a full-res still for OCR.
+            // The live stream at 720x1280 can't read tiny hearing aid text,
+            // but a 12MP still can.
+            _autoCapturForOcr();
+          }
+        }
       });
-    } catch (_) {
-      // ML Kit can fail on corrupt frames — skip silently
+    } catch (e, st) {
+      debugPrint('SCANNER: _processFrame error: $e\n$st');
     }
   }
 
   InputImage? _buildInputImage(CameraImage image) {
-    if (_camera == null) return null;
+    if (_camera == null) {
+      debugPrint('SCANNER: _camera is null');
+      return null;
+    }
 
-    final rotation = InputImageRotationValue.fromRawValue(
-      _camera!.sensorOrientation,
-    );
-    if (rotation == null) return null;
+    final sensorOrientation = _camera!.sensorOrientation;
+    final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    if (rotation == null) {
+      debugPrint('SCANNER: rotation null for sensorOrientation=$sensorOrientation');
+      return null;
+    }
 
-    final format = InputImageFormatValue.fromRawValue(image.format.raw as int);
-    if (format == null) return null;
+    // On iOS, image.format.raw may not cast cleanly to int.
+    // BGRA8888 on iOS = format value 1111970369.
+    final int rawFormat;
+    try {
+      rawFormat = image.format.raw as int;
+    } catch (e) {
+      debugPrint('SCANNER: format.raw cast failed: ${image.format.raw} (${image.format.raw.runtimeType})');
+      return null;
+    }
+
+    final format = InputImageFormatValue.fromRawValue(rawFormat);
+    if (format == null) {
+      debugPrint('SCANNER: format null for rawFormat=$rawFormat (group=${image.format.group})');
+      return null;
+    }
 
     return InputImage.fromBytes(
       bytes: _concatenatePlanes(image),
@@ -456,6 +622,252 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     });
   }
 
+  // ── Colour picker ────────────────────────────────────────────────────
+
+  void _showColourPicker() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xF0000000),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'CORRECT COLOUR',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0x99FFFFFF),
+                letterSpacing: 2.0,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: ColourClassifier.palette.map((entry) {
+                final isDetected = entry.name == _detectedColour;
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    _confirmColour(entry.name, entry.color);
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: entry.color,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isDetected
+                                ? AppColors.success
+                                : const Color(0x33FFFFFF),
+                            width: isDetected ? 2 : 1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        entry.name.toUpperCase(),
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 9,
+                          fontWeight:
+                              isDetected ? FontWeight.w700 : FontWeight.w500,
+                          color: isDetected
+                              ? AppColors.success
+                              : const Color(0x88FFFFFF),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Called when the user corrects the auto-detected colour via the picker.
+  void _confirmColour(String name, Color rgb) {
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _detectedColour = name;
+      _detectedColourRgb = rgb;
+      _colourConfirmed = true;
+    });
+
+    // Update existing colour capture label, or add one if somehow missing
+    final existing = _captures.where((c) => c.field == 'COLOUR').firstOrNull;
+    if (existing != null) {
+      existing.label = name;
+    } else {
+      _captures.add(CapturedFeature(
+        id: 'COLOUR_${DateTime.now().millisecondsSinceEpoch}',
+        label: name,
+        field: 'COLOUR',
+      )..state = CaptureState.done);
+    }
+  }
+
+  // ── Auto-capture: full-res OCR ───────────────────────────────────────
+
+  bool _ocrCaptureInProgress = false;
+
+  /// Take a full-resolution still and run both the neural net brand classifier
+  /// AND ML Kit OCR on it. Triggered when colour stabilises.
+  ///
+  /// Two parallel identification signals:
+  /// 1. EfficientNet-B0 → brand classification from visual appearance (~10ms)
+  /// 2. ML Kit OCR → brand/model from text on the device (if readable)
+  /// Neural net result is primary; OCR can override or add model info.
+  Future<void> _autoCapturForOcr() async {
+    if (_ocrCaptureInProgress || _cameraController == null) return;
+    _ocrCaptureInProgress = true;
+
+    debugPrint('SCANNER: auto-capture triggered — running neural net + OCR');
+
+    try {
+      // Brief pause to capture a sharp still
+      await _cameraController!.stopImageStream();
+      final xFile = await _cameraController!.takePicture();
+
+      // Resume stream immediately — don't block the live view
+      if (mounted && _cameraController != null) {
+        await _cameraController!.startImageStream(_onCameraFrame);
+      }
+
+      if (_disposed || !mounted) return;
+
+      // ── Signal 1: Neural net brand classification ────────────────────
+      // Runs on Neural Engine (iOS) or GPU (Android), ~10ms
+      if (_brandClassifier.isLoaded && _detectedBrand == null) {
+        try {
+          final prediction = await _brandClassifier.classifyFile(xFile.path);
+          debugPrint('SCANNER: neural net → ${prediction.brand} '
+              '(${(prediction.confidence * 100).toStringAsFixed(1)}%)');
+
+          // Log top 3 for debugging
+          for (final p in prediction.topN(3)) {
+            debugPrint('  ${p.brand}: ${(p.probability * 100).toStringAsFixed(1)}%');
+          }
+
+          if (prediction.confidence >= 0.4 && mounted) {
+            setState(() {
+              _detectedBrand = prediction.brand;
+              _brandConfidence =
+                  '${(prediction.confidence * 100).round()}% AI';
+            });
+            HapticFeedback.mediumImpact();
+            _showCrossReference(prediction.brand);
+          }
+        } catch (e) {
+          debugPrint('SCANNER: neural net error: $e');
+        }
+      }
+
+      // ── Signal 2: ML Kit OCR (text on the device) ───────────────────
+      final inputImage = InputImage.fromFilePath(xFile.path);
+      final recognizedText = await _textRecognizer.processImage(inputImage);
+
+      if (_disposed || !mounted) return;
+
+      debugPrint('SCANNER: full-res OCR found '
+          '${recognizedText.blocks.length} blocks');
+
+      for (final block in recognizedText.blocks) {
+        for (final line in block.lines) {
+          final text = line.text.trim();
+          if (text.isEmpty || text.length < 2) continue;
+
+          debugPrint('SCANNER: full-res text: "$text"');
+
+          // Model-first detection (can also override neural net brand)
+          if (_detectedModel == null) {
+            final reverse = BrandMatcher.matchModelAnyBrand(text);
+            if (reverse != null) {
+              debugPrint('SCANNER: OCR MODEL MATCH: '
+                  '${reverse.brand} / ${reverse.model}');
+              setState(() {
+                _detectedModel = reverse.model;
+                // OCR model match is very reliable — override neural net
+                // brand if different
+                if (_detectedBrand != reverse.brand) {
+                  debugPrint('SCANNER: OCR overriding neural net brand '
+                      '$_detectedBrand → ${reverse.brand}');
+                  _detectedBrand = reverse.brand;
+                  _brandConfidence = 'FROM MODEL';
+                }
+              });
+              HapticFeedback.mediumImpact();
+              _showCrossReference(_detectedBrand!);
+            }
+          }
+
+          // Brand matching from OCR (if neural net didn't find it)
+          if (_detectedBrand == null) {
+            final result = BrandMatcher.matchBrandDetailed(text);
+            if (result != null) {
+              debugPrint('SCANNER: OCR BRAND MATCH: ${result.displayName}');
+              setState(() {
+                _detectedBrand = result.displayName;
+                _brandConfidence = result.confidenceLabel;
+              });
+              HapticFeedback.mediumImpact();
+              _showCrossReference(result.displayName);
+            }
+          }
+
+          // Brand-specific model matching
+          if (_detectedBrand != null && _detectedModel == null) {
+            final model = BrandMatcher.matchModel(text, _detectedBrand!);
+            if (model != null) {
+              debugPrint('SCANNER: OCR MODEL MATCH '
+                  '(brand-specific): $model');
+              setState(() => _detectedModel = model);
+              HapticFeedback.mediumImpact();
+            }
+          }
+        }
+      }
+
+      // Upload the captured image in background
+      _uploadInBackground(CapturedFeature(
+        id: 'SCAN_${DateTime.now().millisecondsSinceEpoch}',
+        label: _detectedBrand ?? 'scan',
+        field: 'SCAN',
+      )..imagePath = xFile.path);
+
+      // Check completion
+      if (_detectedBrand != null && !_completionFired) {
+        // Brand alone is enough to show completion — model is a bonus
+        _completionFired = true;
+        _fireCompletion();
+      }
+    } catch (e) {
+      debugPrint('SCANNER: auto-capture error: $e');
+      // Resume stream if it failed
+      if (mounted && _cameraController != null) {
+        try {
+          await _cameraController!.startImageStream(_onCameraFrame);
+        } catch (_) {}
+      }
+    } finally {
+      _ocrCaptureInProgress = false;
+    }
+  }
+
   // ── Actions ───────────────────────────────────────────────────────────
 
   Future<void> _captureAndReview() async {
@@ -537,8 +949,8 @@ class _LiveScanScreenState extends State<LiveScanScreen>
             ),
 
             // Feature overlay (green + amber boxes + snap ripples)
-            if (_phase != _ScanPhase.booting &&
-                (_liveDetections.isNotEmpty || _snapEvents.isNotEmpty))
+            // Always show when scanning — the overlay IS the T2 experience
+            if (_phase != _ScanPhase.booting)
               Positioned.fill(
                 child: AnimatedBuilder(
                   animation: _pulseController,
@@ -595,6 +1007,11 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                       showHint: _showHint,
                       onReview: _captureAndReview,
                       onFallback: _pickFromGallery,
+                      detectedColour: _detectedColour,
+                      detectedColourRgb: _detectedColourRgb,
+                      colourConfidence: _colourConfidence,
+                      colourConfirmed: _colourConfirmed,
+                      onColourTap: _showColourPicker,
                     ),
                     Container(
                       color: Colors.black,

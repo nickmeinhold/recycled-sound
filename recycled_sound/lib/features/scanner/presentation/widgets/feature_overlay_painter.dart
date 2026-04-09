@@ -76,6 +76,9 @@ class FeatureOverlayPainter extends CustomPainter {
       _drawSnapRipple(canvas, rect, age / 500.0);
     }
 
+    // Always draw a centre scanning reticle — the T2 "I'm looking" signal
+    _drawScanReticle(canvas, size);
+
     if (detections.isEmpty) return;
 
     // Draw ambient detections first (underneath)
@@ -97,24 +100,17 @@ class FeatureOverlayPainter extends CustomPainter {
   }
 
   Rect _transformRect(Rect rect, Size widgetSize) {
-    final Size rotatedSize;
-    if (sensorOrientation == 90 || sensorOrientation == 270) {
-      rotatedSize = Size(imageSize.height, imageSize.width);
-    } else {
-      rotatedSize = imageSize;
-    }
-
-    final scaleX = widgetSize.width / rotatedSize.width;
-    final scaleY = widgetSize.height / rotatedSize.height;
-    final scale = scaleX > scaleY ? scaleX : scaleY;
-    final offsetX = (widgetSize.width - rotatedSize.width * scale) / 2;
-    final offsetY = (widgetSize.height - rotatedSize.height * scale) / 2;
+    // On iOS, ML Kit returns bounding boxes already in display-oriented
+    // coordinates (it applies the InputImageRotation internally). So we only
+    // need to scale from image space to widget space — no rotation needed.
+    final scaleX = widgetSize.width / imageSize.width;
+    final scaleY = widgetSize.height / imageSize.height;
 
     return Rect.fromLTRB(
-      rect.left * scale + offsetX,
-      rect.top * scale + offsetY,
-      rect.right * scale + offsetX,
-      rect.bottom * scale + offsetY,
+      rect.left * scaleX,
+      rect.top * scaleY,
+      rect.right * scaleX,
+      rect.bottom * scaleY,
     );
   }
 
@@ -145,6 +141,31 @@ class FeatureOverlayPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     _drawCorners(canvas, rect.inflate(4), paint);
+  }
+
+  /// Centre-frame scanning reticle — always visible while scanning.
+  /// Pulses gently in amber to show the scanner is active and looking.
+  void _drawScanReticle(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final side = size.shortestSide * 0.35;
+
+    // Visible breathing effect
+    final breath = 1.0 + 0.06 * animationValue;
+    final rect = Rect.fromCenter(
+      center: Offset(cx, cy),
+      width: side * breath,
+      height: side * breath,
+    );
+
+    final opacity = 0.2 + 0.4 * animationValue; // 0.2 → 0.6
+    final paint = Paint()
+      ..color = _ambientColor.withValues(alpha: opacity)
+      ..strokeWidth = 1.5 + 1.0 * animationValue // 1.5 → 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    _drawCorners(canvas, rect, paint);
   }
 
   void _drawAmbientBrackets(Canvas canvas, Rect rect) {
@@ -206,8 +227,5 @@ class FeatureOverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant FeatureOverlayPainter old) =>
-      detections != old.detections ||
-      animationValue != old.animationValue ||
-      snapEvents.length != old.snapEvents.length;
+  bool shouldRepaint(covariant FeatureOverlayPainter old) => true;
 }
