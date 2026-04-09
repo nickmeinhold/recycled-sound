@@ -101,6 +101,16 @@ class ResultsScreen extends ConsumerWidget {
                           .read(scanResultProvider.notifier)
                           .updateField('type', v),
                     ),
+                    if (result.colour != null) ...[
+                      const Divider(),
+                      _EditableSpecRow(
+                        label: 'Colour',
+                        field: result.colour!,
+                        onSave: (v) => ref
+                            .read(scanResultProvider.notifier)
+                            .updateField('colour', v),
+                      ),
+                    ],
                     const Divider(),
                     _EditableSpecRow(
                       label: 'Year',

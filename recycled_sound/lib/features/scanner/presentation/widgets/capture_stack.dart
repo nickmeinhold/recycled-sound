@@ -18,8 +18,8 @@ class CapturedFeature {
 
   final String id;
 
-  /// Display label, e.g. "OTICON".
-  final String label;
+  /// Display label, e.g. "OTICON". Mutable to allow corrections.
+  String label;
 
   /// Which field this is: "MAKE", "MODEL", etc.
   final String field;

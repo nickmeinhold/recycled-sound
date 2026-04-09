@@ -33,6 +33,7 @@ class ScanResult {
     required this.domeType,
     required this.waxFilter,
     required this.receiver,
+    this.colour,
     this.rawLabels = const [],
   });
 
@@ -46,6 +47,10 @@ class ScanResult {
   final SpecField domeType;
   final SpecField waxFilter;
   final SpecField receiver;
+
+  /// Device colour identified by on-device colour sampling.
+  final SpecField? colour;
+
   final List<String> rawLabels;
 
   ScanResult copyWith({
@@ -59,6 +64,7 @@ class ScanResult {
     SpecField? domeType,
     SpecField? waxFilter,
     SpecField? receiver,
+    SpecField? colour,
     List<String>? rawLabels,
   }) =>
       ScanResult(
@@ -72,6 +78,7 @@ class ScanResult {
         domeType: domeType ?? this.domeType,
         waxFilter: waxFilter ?? this.waxFilter,
         receiver: receiver ?? this.receiver,
+        colour: colour ?? this.colour,
         rawLabels: rawLabels ?? this.rawLabels,
       );
 
@@ -90,6 +97,9 @@ class ScanResult {
             SpecField.fromJson(json['waxFilter'] as Map<String, dynamic>),
         receiver:
             SpecField.fromJson(json['receiver'] as Map<String, dynamic>),
+        colour: json['colour'] != null
+            ? SpecField.fromJson(json['colour'] as Map<String, dynamic>)
+            : null,
         rawLabels: (json['rawLabels'] as List<dynamic>?)
                 ?.map((e) => e as String)
                 .toList() ??
@@ -108,6 +118,7 @@ class ScanResult {
         domeType: SpecField(value: 'Closed', confidence: 70),
         waxFilter: SpecField(value: 'CeruShield Disk', confidence: 65),
         receiver: SpecField(value: 'M receiver', confidence: 72),
+        colour: SpecField(value: 'Champagne', confidence: 70),
         rawLabels: ['hearing aid', 'Phonak', 'behind-the-ear', 'medical device'],
       );
 }

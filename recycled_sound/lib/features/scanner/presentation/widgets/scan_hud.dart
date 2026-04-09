@@ -18,6 +18,11 @@ class ScanHud extends StatelessWidget {
     required this.showHint,
     required this.onReview,
     required this.onFallback,
+    this.detectedColour,
+    this.detectedColourRgb,
+    this.colourConfidence = 0.0,
+    this.colourConfirmed = false,
+    this.onColourTap,
   });
 
   final String? detectedBrand;
@@ -33,7 +38,23 @@ class ScanHud extends StatelessWidget {
   final VoidCallback onReview;
   final VoidCallback onFallback;
 
-  bool get _hasDetections => detectedBrand != null || detectedModel != null;
+  /// Detected colour name from the stabiliser, e.g. "Champagne".
+  final String? detectedColour;
+
+  /// The palette reference colour for the swatch.
+  final Color? detectedColourRgb;
+
+  /// Colour detection confidence 0.0–1.0 (fills over ~8 frames).
+  final double colourConfidence;
+
+  /// Whether the colour has reached consensus or been manually confirmed.
+  final bool colourConfirmed;
+
+  /// Called when the user taps the colour row to open the picker.
+  final VoidCallback? onColourTap;
+
+  bool get _hasDetections =>
+      detectedBrand != null || detectedModel != null || detectedColour != null;
   bool get _isComplete => detectedBrand != null && detectedModel != null;
 
   @override
@@ -82,6 +103,16 @@ class ScanHud extends StatelessWidget {
               value: detectedModel,
               detected: detectedModel != null,
             ),
+            if (detectedColour != null) ...[
+              const SizedBox(height: 4),
+              _ColourRow(
+                colour: detectedColour!,
+                colourRgb: detectedColourRgb,
+                confidence: colourConfidence,
+                confirmed: colourConfirmed,
+                onTap: onColourTap,
+              ),
+            ],
             const SizedBox(height: 12),
           ],
 
@@ -222,6 +253,114 @@ class _FeatureRow extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Colour detection row with swatch and tap-to-confirm interaction.
+class _ColourRow extends StatelessWidget {
+  const _ColourRow({
+    required this.colour,
+    required this.colourRgb,
+    required this.confidence,
+    required this.confirmed,
+    this.onTap,
+  });
+
+  final String colour;
+  final Color? colourRgb;
+  final double confidence;
+  final bool confirmed;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: confirmed ? onTap : null, // Only tappable once confirmed (to correct)
+      child: Row(
+        children: [
+          // Status: filling circle while building confidence, checkmark when done
+          if (confirmed)
+            const Icon(Icons.check_circle, size: 16, color: AppColors.success)
+          else
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                value: confidence,
+                strokeWidth: 2,
+                color: AppColors.success,
+                backgroundColor: const Color(0x33FFFFFF),
+              ),
+            ),
+          const SizedBox(width: 8),
+          // Field label
+          const SizedBox(
+            width: 52,
+            child: Text(
+              'COLOUR',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Color(0x99FFFFFF),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          // Colour swatch — opacity grows with confidence
+          if (colourRgb != null) ...[
+            Container(
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                color: colourRgb!.withValues(alpha: 0.4 + 0.6 * confidence),
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(
+                  color: const Color(0x55FFFFFF),
+                  width: 1,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          // Colour name — opacity grows with confidence
+          Expanded(
+            child: Text(
+              colour,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 13,
+                fontWeight: confirmed ? FontWeight.w600 : FontWeight.w400,
+                color: confirmed
+                    ? AppColors.success
+                    : AppColors.success.withValues(
+                        alpha: 0.3 + 0.7 * confidence),
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+          // Edit badge — only after confirmed
+          if (confirmed)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(3),
+                color: const Color(0x33FFFFFF),
+              ),
+              child: const Text(
+                'EDIT',
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0x99FFFFFF),
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
