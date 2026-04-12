@@ -34,6 +34,8 @@ class ScanResult {
     required this.waxFilter,
     required this.receiver,
     this.colour,
+    this.tubing,
+    this.powerSource,
     this.rawLabels = const [],
   });
 
@@ -41,7 +43,10 @@ class ScanResult {
   final String imageUrl;
   final SpecField brand;
   final SpecField model;
+
+  /// Style/form factor: BTE, RIC, ITE, CIC, ITC, IIC.
   final SpecField type;
+
   final SpecField year;
   final SpecField batterySize;
   final SpecField domeType;
@@ -51,7 +56,47 @@ class ScanResult {
   /// Device colour identified by on-device colour sampling.
   final SpecField? colour;
 
+  /// Tubing type: slim, standard, or none (Seray's field 4).
+  final SpecField? tubing;
+
+  /// Power source: Battery or Rechargeable (Seray's field 5).
+  final SpecField? powerSource;
+
   final List<String> rawLabels;
+
+  /// The 7 fields Seray's audiologist model requires, in order.
+  /// Returns a map of field key → (label, SpecField?, whether AI can fill it).
+  List<({String key, String label, SpecField? field, bool aiAssisted})>
+      get sevenFields => [
+            (key: 'brand', label: 'Make', field: brand, aiAssisted: true),
+            (key: 'model', label: 'Model', field: model, aiAssisted: true),
+            (key: 'type', label: 'Style', field: type, aiAssisted: true),
+            (key: 'tubing', label: 'Tubing', field: tubing, aiAssisted: false),
+            (
+              key: 'powerSource',
+              label: 'Power',
+              field: powerSource,
+              aiAssisted: false,
+            ),
+            (
+              key: 'batterySize',
+              label: 'Battery Size',
+              field: batterySize,
+              aiAssisted: false,
+            ),
+            (key: 'colour', label: 'Colour', field: colour, aiAssisted: true),
+          ];
+
+  /// How many of the 7 fields have a non-empty value.
+  int get filledFieldCount => sevenFields
+      .where((f) =>
+          f.field != null &&
+          f.field!.value.isNotEmpty &&
+          f.field!.value != '—')
+      .length;
+
+  /// Whether all 7 fields are filled.
+  bool get isComplete => filledFieldCount == 7;
 
   ScanResult copyWith({
     String? scanId,
@@ -65,6 +110,8 @@ class ScanResult {
     SpecField? waxFilter,
     SpecField? receiver,
     SpecField? colour,
+    SpecField? tubing,
+    SpecField? powerSource,
     List<String>? rawLabels,
   }) =>
       ScanResult(
@@ -79,6 +126,8 @@ class ScanResult {
         waxFilter: waxFilter ?? this.waxFilter,
         receiver: receiver ?? this.receiver,
         colour: colour ?? this.colour,
+        tubing: tubing ?? this.tubing,
+        powerSource: powerSource ?? this.powerSource,
         rawLabels: rawLabels ?? this.rawLabels,
       );
 
@@ -100,6 +149,12 @@ class ScanResult {
         colour: json['colour'] != null
             ? SpecField.fromJson(json['colour'] as Map<String, dynamic>)
             : null,
+        tubing: json['tubing'] != null
+            ? SpecField.fromJson(json['tubing'] as Map<String, dynamic>)
+            : null,
+        powerSource: json['powerSource'] != null
+            ? SpecField.fromJson(json['powerSource'] as Map<String, dynamic>)
+            : null,
         rawLabels: (json['rawLabels'] as List<dynamic>?)
                 ?.map((e) => e as String)
                 .toList() ??
@@ -107,18 +162,22 @@ class ScanResult {
       );
 
   /// Returns a mock result for development/testing.
+  ///
+  /// Simulates a real scan: brand, model, and colour are AI-filled.
+  /// Style is pre-populated from CLIP probe (91.2%). Tubing, power source,
+  /// and battery size are left for the audiologist.
   factory ScanResult.mock() => const ScanResult(
         scanId: 'mock-001',
         imageUrl: '',
         brand: SpecField(value: 'Phonak', confidence: 95),
         model: SpecField(value: 'Audéo P90', confidence: 88),
-        type: SpecField(value: 'RIC (Receiver-in-Canal)', confidence: 92),
+        type: SpecField(value: 'RIC', confidence: 91),
         year: SpecField(value: '2021', confidence: 75),
-        batterySize: SpecField(value: 'Size 312', confidence: 80),
+        batterySize: SpecField(value: '', confidence: 0),
         domeType: SpecField(value: 'Closed', confidence: 70),
         waxFilter: SpecField(value: 'CeruShield Disk', confidence: 65),
         receiver: SpecField(value: 'M receiver', confidence: 72),
-        colour: SpecField(value: 'Champagne', confidence: 70),
+        colour: SpecField(value: 'Champagne', confidence: 85),
         rawLabels: ['hearing aid', 'Phonak', 'behind-the-ear', 'medical device'],
       );
 }

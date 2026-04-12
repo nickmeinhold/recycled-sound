@@ -88,6 +88,13 @@ class HomeScreen extends StatelessWidget {
                 subtitle: 'View all collected hearing aids',
                 onTap: () => context.go('/devices'),
               ),
+              const SizedBox(height: 8),
+              _ActionTile(
+                icon: Icons.assignment_turned_in,
+                title: '7-Field Confirmation',
+                subtitle: 'Preview with mock scan data',
+                onTap: () => context.push('/scan/confirm'),
+              ),
             ],
           ),
         ),

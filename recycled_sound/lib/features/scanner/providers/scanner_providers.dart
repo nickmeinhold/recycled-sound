@@ -66,6 +66,13 @@ class ScanResultNotifier extends Notifier<ScanResult> {
   /// Update a single spec field and record the correction with full context.
   void updateField(String fieldName, String newValue) {
     final current = state;
+    // Known field names — reject anything not in this set.
+    const knownFields = {
+      'brand', 'model', 'type', 'year', 'batterySize',
+      'domeType', 'waxFilter', 'receiver', 'colour', 'tubing', 'powerSource',
+    };
+    if (!knownFields.contains(fieldName)) return;
+
     final oldField = switch (fieldName) {
       'brand' => current.brand,
       'model' => current.model,
@@ -75,15 +82,22 @@ class ScanResultNotifier extends Notifier<ScanResult> {
       'domeType' => current.domeType,
       'waxFilter' => current.waxFilter,
       'receiver' => current.receiver,
-      _ => null,
+      'colour' => current.colour,
+      'tubing' => current.tubing,
+      'powerSource' => current.powerSource,
+      _ => null, // unreachable after guard above
     };
 
-    if (oldField == null || oldField.value == newValue) return;
+    // For fields that start null (tubing, powerSource, colour),
+    // record the correction from empty.
+    final originalValue = oldField?.value ?? '';
+    final originalConfidence = oldField?.confidence ?? 0;
+    if (originalValue == newValue) return;
 
     _corrections.add(Correction(
       field: fieldName,
-      originalValue: oldField.value,
-      originalConfidence: oldField.confidence,
+      originalValue: originalValue,
+      originalConfidence: originalConfidence,
       correctedValue: newValue,
       rawLabels: current.rawLabels,
       timestamp: DateTime.now(),
@@ -100,6 +114,9 @@ class ScanResultNotifier extends Notifier<ScanResult> {
       'domeType' => current.copyWith(domeType: corrected),
       'waxFilter' => current.copyWith(waxFilter: corrected),
       'receiver' => current.copyWith(receiver: corrected),
+      'colour' => current.copyWith(colour: corrected),
+      'tubing' => current.copyWith(tubing: corrected),
+      'powerSource' => current.copyWith(powerSource: corrected),
       _ => current,
     };
   }

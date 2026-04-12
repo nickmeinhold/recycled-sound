@@ -1,0 +1,951 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/theme/app_colors.dart';
+import '../data/brand_colour_palettes.dart';
+import '../data/colour_classifier.dart';
+import '../data/models/scan_result.dart';
+import '../providers/scanner_providers.dart';
+
+/// The 7-field confirmation screen — where AI meets audiologist.
+///
+/// This screen is the convergence point for every signal upstream (neural net,
+/// OCR, CIELAB colour, CLIP style probe) and the gateway to everything
+/// downstream (device register, matching, redistribution).
+///
+/// Design language: dark background carrying the T2 HUD aesthetic forward.
+/// Green = AI confident. Amber = needs attention. Pulse = "I still need this."
+/// Not a form — a conversation the scanner had with the device, presented
+/// for the audiologist to confirm or correct.
+class ConfirmationScreen extends ConsumerStatefulWidget {
+  const ConfirmationScreen({super.key});
+
+  @override
+  ConsumerState<ConfirmationScreen> createState() => _ConfirmationScreenState();
+}
+
+class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final AnimationController _completionController;
+  bool _completionFired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+
+    _completionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _completionController.dispose();
+    super.dispose();
+  }
+
+  void _checkCompletion(ScanResult result) {
+    if (result.isComplete && !_completionFired) {
+      _completionFired = true;
+      HapticFeedback.heavyImpact();
+      _completionController.forward();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final result = ref.watch(scanResultProvider);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkCompletion(result);
+    });
+
+    final filled = result.filledFieldCount;
+    final brandPalette = result.brand.value.isNotEmpty
+        ? BrandColourPalettes.forBrand(result.brand.value)
+        : null;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D0D0D),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── Header strip ──────────────────────────────────────────
+            _HeaderStrip(
+              filled: filled,
+              total: 7,
+              isComplete: result.isComplete,
+              completionAnimation: _completionController,
+              onClose: () => context.go('/'),
+            ),
+
+            // ── Field list ────────────────────────────────────────────
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                children: [
+                  // 1. MAKE — AI-filled, tap to correct
+                  _AiTextField(
+                    label: 'MAKE',
+                    field: result.brand,
+                    pulseController: _pulseController,
+                    onSave: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('brand', v),
+                  ),
+
+                  // 2. MODEL — AI-filled, tap to correct
+                  _AiTextField(
+                    label: 'MODEL',
+                    field: result.model,
+                    pulseController: _pulseController,
+                    onSave: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('model', v),
+                  ),
+
+                  // 3. STYLE — chip selector (CLIP probe @ 91.2%)
+                  _ChipSelectorField(
+                    label: 'STYLE',
+                    field: result.type,
+                    options: const [
+                      'BTE',
+                      'RIC',
+                      'ITE',
+                      'ITC',
+                      'CIC',
+                      'IIC',
+                    ],
+                    pulseController: _pulseController,
+                    aiConfidence: result.type.confidence,
+                    onSelect: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('type', v),
+                  ),
+
+                  // 4. TUBING — chip selector (human only)
+                  _ChipSelectorField(
+                    label: 'TUBING',
+                    field: result.tubing,
+                    options: const ['Slim', 'Standard', 'None'],
+                    pulseController: _pulseController,
+                    onSelect: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('tubing', v),
+                  ),
+
+                  // 5. POWER — toggle (battery vs rechargeable)
+                  _ChipSelectorField(
+                    label: 'POWER',
+                    field: result.powerSource,
+                    options: const ['Battery', 'Rechargeable'],
+                    pulseController: _pulseController,
+                    onSelect: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('powerSource', v),
+                  ),
+
+                  // 6. BATTERY SIZE — chip selector (4 classes)
+                  _ChipSelectorField(
+                    label: 'BATTERY',
+                    field: _batteryDisplayField(result),
+                    options: const ['10', '13', '312', '675', 'N/A'],
+                    pulseController: _pulseController,
+                    onSelect: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('batterySize', v),
+                    enabled: result.powerSource?.value != 'Rechargeable',
+                  ),
+
+                  // 7. COLOUR — brand-specific swatches
+                  _ColourSwatchField(
+                    label: 'COLOUR',
+                    field: result.colour,
+                    brandPalette: brandPalette,
+                    genericPalette: ColourClassifier.palette,
+                    pulseController: _pulseController,
+                    onSelect: (v) => ref
+                        .read(scanResultProvider.notifier)
+                        .updateField('colour', v),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Bottom action ─────────────────────────────────────────
+            _BottomAction(
+              isComplete: result.isComplete,
+              completionAnimation: _completionController,
+              onConfirm: () {
+                HapticFeedback.mediumImpact();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Device added to register (pending QA)'),
+                    backgroundColor: AppColors.success,
+                  ),
+                );
+                context.go('/devices');
+              },
+              onScanAnother: () => context.pushReplacement('/scan'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// If power source is "Rechargeable", override battery size display.
+  SpecField? _batteryDisplayField(ScanResult result) {
+    if (result.powerSource?.value == 'Rechargeable') {
+      return const SpecField(value: 'N/A', confidence: 100);
+    }
+    return result.batterySize.value.isEmpty ? null : result.batterySize;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Header Strip — progress counter + completion flash
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _HeaderStrip extends StatelessWidget {
+  const _HeaderStrip({
+    required this.filled,
+    required this.total,
+    required this.isComplete,
+    required this.completionAnimation,
+    required this.onClose,
+  });
+
+  final int filled;
+  final int total;
+  final bool isComplete;
+  final AnimationController completionAnimation;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: completionAnimation,
+      builder: (context, child) {
+        final glow = completionAnimation.value;
+        return Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          decoration: BoxDecoration(
+            color: Color.lerp(
+              const Color(0xFF1A1A1A),
+              AppColors.success.withValues(alpha: 0.15),
+              glow,
+            ),
+            border: Border(
+              bottom: BorderSide(
+                color: isComplete
+                    ? AppColors.success.withValues(alpha: 0.3 + 0.4 * glow)
+                    : const Color(0xFF333333),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              // Progress dots
+              ...List.generate(total, (i) {
+                final isFilled = i < filled;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isFilled
+                          ? AppColors.success
+                          : const Color(0xFF444444),
+                      boxShadow: isFilled && isComplete
+                          ? [
+                              BoxShadow(
+                                color:
+                                    AppColors.success.withValues(alpha: 0.5),
+                                blurRadius: 4 + 4 * glow,
+                              ),
+                            ]
+                          : null,
+                    ),
+                  ),
+                );
+              }),
+
+              const SizedBox(width: 12),
+
+              // Counter text
+              Text(
+                isComplete ? 'IDENTIFICATION COMPLETE' : '$filled OF $total',
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                  color: isComplete
+                      ? AppColors.success
+                      : const Color(0xFF888888),
+                ),
+              ),
+
+              const Spacer(),
+
+              // Close
+              IconButton(
+                icon: const Icon(Icons.close, color: Color(0xFF888888)),
+                iconSize: 20,
+                onPressed: onClose,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI Text Field — for Make & Model (tap to edit free text)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _AiTextField extends StatefulWidget {
+  const _AiTextField({
+    required this.label,
+    required this.field,
+    required this.pulseController,
+    required this.onSave,
+  });
+
+  final String label;
+  final SpecField field;
+  final AnimationController pulseController;
+  final ValueChanged<String> onSave;
+
+  @override
+  State<_AiTextField> createState() => _AiTextFieldState();
+}
+
+class _AiTextFieldState extends State<_AiTextField> {
+  bool _editing = false;
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.field.value);
+  }
+
+  @override
+  void didUpdateWidget(_AiTextField old) {
+    super.didUpdateWidget(old);
+    if (old.field.value != widget.field.value && !_editing) {
+      _controller.text = widget.field.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final v = _controller.text.trim();
+    if (v.isNotEmpty && v != widget.field.value) {
+      HapticFeedback.lightImpact();
+      widget.onSave(v);
+    }
+    setState(() => _editing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasFill = widget.field.value.isNotEmpty;
+    final confidence = widget.field.confidence;
+
+    return _FieldContainer(
+      hasFill: hasFill,
+      pulseController: widget.pulseController,
+      child: Row(
+        children: [
+          _FieldLabel(label: widget.label),
+          if (_editing) ...[
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                autofocus: true,
+                style: _valueStyle(true),
+                cursorColor: AppColors.success,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 4),
+                ),
+                onSubmitted: (_) => _save(),
+              ),
+            ),
+            _ActionButton(
+              icon: Icons.check,
+              color: AppColors.success,
+              onTap: _save,
+            ),
+          ] else ...[
+            Expanded(
+              child: Text(
+                hasFill ? widget.field.value : '— tap to enter —',
+                style: _valueStyle(hasFill),
+              ),
+            ),
+            if (hasFill) _ConfidenceBadge(confidence: confidence),
+            const SizedBox(width: 8),
+            _ActionButton(
+              icon: hasFill ? Icons.edit_outlined : Icons.add,
+              color: hasFill ? const Color(0xFF666666) : _amberColor,
+              onTap: () => setState(() => _editing = true),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chip Selector Field — for Style, Tubing, Power, Battery Size
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ChipSelectorField extends StatelessWidget {
+  const _ChipSelectorField({
+    required this.label,
+    required this.field,
+    required this.options,
+    required this.pulseController,
+    required this.onSelect,
+    this.aiConfidence,
+    this.enabled = true,
+  });
+
+  final String label;
+  final SpecField? field;
+  final List<String> options;
+  final AnimationController pulseController;
+  final ValueChanged<String> onSelect;
+  final int? aiConfidence;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = field?.value ?? '';
+    final hasFill = current.isNotEmpty && current != '—';
+
+    return _FieldContainer(
+      hasFill: hasFill,
+      pulseController: pulseController,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _FieldLabel(label: label),
+              if (hasFill && aiConfidence != null && aiConfidence! > 0)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: _ConfidenceBadge(confidence: aiConfidence!),
+                ),
+              if (!enabled)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Text(
+                    'N/A',
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      color: Color(0xFF555555),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: options.map((option) {
+              final isSelected = current == option;
+              return GestureDetector(
+                onTap: enabled
+                    ? () {
+                        HapticFeedback.selectionClick();
+                        onSelect(option);
+                      }
+                    : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.success.withValues(alpha: 0.15)
+                        : enabled
+                            ? const Color(0xFF222222)
+                            : const Color(0xFF1A1A1A),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppColors.success.withValues(alpha: 0.6)
+                          : enabled
+                              ? const Color(0xFF444444)
+                              : const Color(0xFF333333),
+                      width: isSelected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    option,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w400,
+                      color: isSelected
+                          ? AppColors.success
+                          : enabled
+                              ? const Color(0xFFAAAAAA)
+                              : const Color(0xFF555555),
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Colour Swatch Field — brand-specific or generic palette
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _ColourSwatchField extends StatelessWidget {
+  const _ColourSwatchField({
+    required this.label,
+    required this.field,
+    required this.brandPalette,
+    required this.genericPalette,
+    required this.pulseController,
+    required this.onSelect,
+  });
+
+  final String label;
+  final SpecField? field;
+  final List<BrandColour>? brandPalette;
+  final List<HearingAidColour> genericPalette;
+  final AnimationController pulseController;
+  final ValueChanged<String> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = field?.value ?? '';
+    final hasFill = current.isNotEmpty;
+
+    // Use brand palette if available, otherwise generic
+    final swatches = brandPalette ??
+        genericPalette
+            .map((c) => BrandColour(c.name, c.color))
+            .toList();
+
+    return _FieldContainer(
+      hasFill: hasFill,
+      pulseController: pulseController,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _FieldLabel(label: label),
+              if (hasFill) ...[
+                const SizedBox(width: 8),
+                _ConfidenceBadge(confidence: field!.confidence),
+              ],
+              if (brandPalette != null) ...[
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    color: AppColors.primary.withValues(alpha: 0.15),
+                  ),
+                  child: Text(
+                    'BRAND PALETTE',
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 8,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary.withValues(alpha: 0.8),
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: swatches.map((swatch) {
+              final isSelected = current == swatch.name;
+              return GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  onSelect(swatch.name);
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: swatch.color,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppColors.success
+                              : const Color(0xFF555555),
+                          width: isSelected ? 2.5 : 1,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color:
+                                      AppColors.success.withValues(alpha: 0.3),
+                                  blurRadius: 8,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: isSelected
+                          ? const Icon(Icons.check,
+                              size: 18, color: Colors.white)
+                          : null,
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        swatch.name,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 8,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: isSelected
+                              ? AppColors.success
+                              : const Color(0xFF888888),
+                          height: 1.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Bottom Action Bar
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _BottomAction extends StatelessWidget {
+  const _BottomAction({
+    required this.isComplete,
+    required this.completionAnimation,
+    required this.onConfirm,
+    required this.onScanAnother,
+  });
+
+  final bool isComplete;
+  final AnimationController completionAnimation;
+  final VoidCallback onConfirm;
+  final VoidCallback onScanAnother;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: completionAnimation,
+      builder: (context, child) {
+        final glow = completionAnimation.value;
+        return Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            border: Border(
+              top: BorderSide(
+                color: isComplete
+                    ? AppColors.success.withValues(alpha: 0.3 + 0.4 * glow)
+                    : const Color(0xFF333333),
+                width: 1,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              // Scan Another (always available)
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: onScanAnother,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF888888),
+                    side: const BorderSide(color: Color(0xFF444444)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'Scan Another',
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 12),
+
+              // Add to Register (enabled when complete)
+              Expanded(
+                flex: 2,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  decoration: isComplete
+                      ? BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: [
+                            BoxShadow(
+                              color:
+                                  AppColors.success.withValues(alpha: 0.3 * glow),
+                              blurRadius: 12,
+                            ),
+                          ],
+                        )
+                      : null,
+                  child: FilledButton.icon(
+                    onPressed: isComplete ? onConfirm : null,
+                    icon: Icon(
+                      isComplete ? Icons.check_circle : Icons.pending,
+                      size: 18,
+                    ),
+                    label: Text(
+                      isComplete ? 'Add to Register' : 'Complete All Fields',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: isComplete
+                          ? AppColors.success
+                          : const Color(0xFF333333),
+                      foregroundColor: isComplete
+                          ? Colors.white
+                          : const Color(0xFF666666),
+                      disabledBackgroundColor: const Color(0xFF333333),
+                      disabledForegroundColor: const Color(0xFF666666),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared primitives
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _amberColor = Color(0xFFD4A026);
+const _greenColor = AppColors.success;
+
+/// Container for each field row — handles the left accent bar and pulse.
+class _FieldContainer extends StatelessWidget {
+  const _FieldContainer({
+    required this.hasFill,
+    required this.pulseController,
+    required this.child,
+  });
+
+  final bool hasFill;
+  final AnimationController pulseController;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: pulseController,
+      builder: (context, child) {
+        final pulseAlpha = hasFill ? 0.0 : 0.15 + 0.15 * pulseController.value;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 2),
+          decoration: BoxDecoration(
+            color: hasFill
+                ? const Color(0xFF151515)
+                : Color.lerp(
+                    const Color(0xFF151515),
+                    _amberColor.withValues(alpha: 0.05),
+                    pulseController.value,
+                  ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border(
+              left: BorderSide(
+                color: hasFill
+                    ? _greenColor.withValues(alpha: 0.6)
+                    : _amberColor.withValues(alpha: pulseAlpha + 0.2),
+                width: 3,
+              ),
+            ),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: child!,
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+/// Monospace field label.
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 72,
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF888888),
+          letterSpacing: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+/// Confidence badge — green/amber/red based on percentage.
+class _ConfidenceBadge extends StatelessWidget {
+  const _ConfidenceBadge({required this.confidence});
+  final int confidence;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = confidence >= 90
+        ? _greenColor
+        : confidence >= 70
+            ? _amberColor
+            : AppColors.error;
+    final label = confidence >= 90
+        ? 'HIGH'
+        : confidence >= 70
+            ? 'MED'
+            : 'LOW';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(3),
+        color: color.withValues(alpha: 0.15),
+      ),
+      child: Text(
+        '$label $confidence%',
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 9,
+          fontWeight: FontWeight.w600,
+          color: color.withValues(alpha: 0.9),
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+}
+
+/// Small icon button used for edit/add/confirm actions.
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          color: color.withValues(alpha: 0.1),
+        ),
+        child: Icon(icon, size: 16, color: color),
+      ),
+    );
+  }
+}
+
+TextStyle _valueStyle(bool hasFill) => TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 15,
+      fontWeight: hasFill ? FontWeight.w600 : FontWeight.w400,
+      color: hasFill ? Colors.white : const Color(0xFF555555),
+      letterSpacing: 0.3,
+    );

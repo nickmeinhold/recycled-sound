@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/scanner/presentation/live_scanner_screen.dart';
 import '../../features/scanner/presentation/analysing_screen.dart';
+import '../../features/scanner/presentation/confirmation_screen.dart';
 import '../../features/scanner/presentation/results_screen.dart';
 import '../../features/devices/presentation/device_list_screen.dart';
 import '../../features/devices/presentation/device_detail_screen.dart';
@@ -57,6 +58,11 @@ final appRouter = GoRouter(
         final scanId = state.extra as String? ?? '';
         return ResultsScreen(scanId: scanId);
       },
+    ),
+    GoRoute(
+      path: '/scan/confirm',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const ConfirmationScreen(),
     ),
     GoRoute(
       path: '/devices/:id',
