@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_typography.dart';
 import '../data/brand_colour_palettes.dart';
 import '../data/colour_classifier.dart';
 import '../data/models/scan_result.dart';
@@ -58,6 +59,10 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
       _completionFired = true;
       HapticFeedback.heavyImpact();
       _completionController.forward();
+    } else if (!result.isComplete && _completionFired) {
+      // User un-filled a field — reset so the ceremony can fire again.
+      _completionFired = false;
+      _completionController.reset();
     }
   }
 
@@ -148,9 +153,16 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     field: result.powerSource,
                     options: const ['Battery', 'Rechargeable'],
                     pulseController: _pulseController,
-                    onSelect: (v) => ref
-                        .read(scanResultProvider.notifier)
-                        .updateField(ScanField.powerSource, v),
+                    onSelect: (v) {
+                      final notifier =
+                          ref.read(scanResultProvider.notifier);
+                      notifier.updateField(ScanField.powerSource, v);
+                      // Clear battery size when switching to rechargeable,
+                      // set N/A so the field counts as filled.
+                      if (v == 'Rechargeable') {
+                        notifier.updateField(ScanField.batterySize, 'N/A');
+                      }
+                    },
                   ),
 
                   // 6. BATTERY SIZE — chip selector (4 classes)
@@ -202,12 +214,10 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
     );
   }
 
-  /// If power source is "Rechargeable", override battery size display.
+  /// Battery size field — null if empty (triggers amber pulse).
   SpecField? _batteryDisplayField(ScanResult result) {
-    if (result.powerSource?.value == 'Rechargeable') {
-      return const SpecField(value: 'N/A', confidence: 100);
-    }
-    return result.batterySize.value.isEmpty ? null : result.batterySize;
+    final bs = result.batterySize;
+    return bs.value.isEmpty ? null : bs;
   }
 }
 
@@ -288,11 +298,7 @@ class _HeaderStrip extends StatelessWidget {
               // Counter text
               Text(
                 isComplete ? 'IDENTIFICATION COMPLETE' : '$filled OF $total',
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
+                style: AppTypography.monoStatus.copyWith(
                   color: isComplete
                       ? AppColors.success
                       : const Color(0xFF888888),
@@ -464,14 +470,12 @@ class _ChipSelectorField extends StatelessWidget {
                   child: _ConfidenceBadge(confidence: aiConfidence!),
                 ),
               if (!enabled)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
+              Padding(
+                  padding: const EdgeInsets.only(left: 8),
                   child: Text(
                     'N/A',
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 11,
-                      color: Color(0xFF555555),
+                    style: AppTypography.monoStatus.copyWith(
+                      color: const Color(0xFF555555),
                     ),
                   ),
                 ),
@@ -514,9 +518,7 @@ class _ChipSelectorField extends StatelessWidget {
                   ),
                   child: Text(
                     option,
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 13,
+                    style: AppTypography.monoValue.copyWith(
                       fontWeight:
                           isSelected ? FontWeight.w600 : FontWeight.w400,
                       color: isSelected
@@ -524,7 +526,6 @@ class _ChipSelectorField extends StatelessWidget {
                           : enabled
                               ? const Color(0xFFAAAAAA)
                               : const Color(0xFF555555),
-                      letterSpacing: 0.3,
                     ),
                   ),
                 ),
@@ -593,12 +594,8 @@ class _ColourSwatchField extends StatelessWidget {
                   ),
                   child: Text(
                     'BRAND PALETTE',
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 8,
-                      fontWeight: FontWeight.w600,
+                    style: AppTypography.monoMicro.copyWith(
                       color: AppColors.primary.withValues(alpha: 0.8),
-                      letterSpacing: 0.8,
                     ),
                   ),
                 ),
@@ -655,9 +652,7 @@ class _ColourSwatchField extends StatelessWidget {
                         textAlign: TextAlign.center,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 8,
+                        style: AppTypography.monoMicro.copyWith(
                           fontWeight: isSelected
                               ? FontWeight.w600
                               : FontWeight.w400,
@@ -729,13 +724,9 @@ class _BottomAction extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Scan Another',
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    style: AppTypography.monoButton,
                   ),
                 ),
               ),
@@ -767,11 +758,7 @@ class _BottomAction extends StatelessWidget {
                     ),
                     label: Text(
                       isComplete ? 'Add to Register' : 'Complete All Fields',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: AppTypography.monoValue,
                     ),
                     style: FilledButton.styleFrom(
                       backgroundColor: isComplete
@@ -823,28 +810,39 @@ class _FieldContainer extends StatelessWidget {
       animation: pulseController,
       builder: (context, child) {
         final pulseAlpha = hasFill ? 0.0 : 0.15 + 0.15 * pulseController.value;
-        return Container(
-          margin: const EdgeInsets.only(bottom: 2),
-          decoration: BoxDecoration(
-            color: hasFill
-                ? const Color(0xFF151515)
-                : Color.lerp(
-                    const Color(0xFF151515),
-                    _amberColor.withValues(alpha: 0.05),
-                    pulseController.value,
-                  ),
+        final accentColor = hasFill
+            ? _greenColor.withValues(alpha: 0.6)
+            : _amberColor.withValues(alpha: pulseAlpha + 0.2);
+        final bgColor = hasFill
+            ? const Color(0xFF151515)
+            : Color.lerp(
+                const Color(0xFF151515),
+                _amberColor.withValues(alpha: 0.05),
+                pulseController.value,
+              )!;
+
+        // Use a Row with a coloured strip instead of Border(left:) + borderRadius,
+        // which Flutter doesn't officially support together.
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            border: Border(
-              left: BorderSide(
-                color: hasFill
-                    ? _greenColor.withValues(alpha: 0.6)
-                    : _amberColor.withValues(alpha: pulseAlpha + 0.2),
-                width: 3,
+            child: Container(
+              color: bgColor,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(width: 3, color: accentColor),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: child!,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          padding: const EdgeInsets.all(14),
-          child: child!,
         );
       },
       child: child,
@@ -861,16 +859,7 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: 72,
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF888888),
-          letterSpacing: 1.0,
-        ),
-      ),
+      child: Text(label, style: AppTypography.monoLabel),
     );
   }
 }
@@ -901,12 +890,8 @@ class _ConfidenceBadge extends StatelessWidget {
       ),
       child: Text(
         '$label $confidence%',
-        style: TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 9,
-          fontWeight: FontWeight.w600,
+        style: AppTypography.monoSmall.copyWith(
           color: color.withValues(alpha: 0.9),
-          letterSpacing: 0.5,
         ),
       ),
     );
@@ -942,10 +927,7 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-TextStyle _valueStyle(bool hasFill) => TextStyle(
-      fontFamily: 'monospace',
-      fontSize: 15,
+TextStyle _valueStyle(bool hasFill) => AppTypography.monoValueLarge.copyWith(
       fontWeight: hasFill ? FontWeight.w600 : FontWeight.w400,
       color: hasFill ? Colors.white : const Color(0xFF555555),
-      letterSpacing: 0.3,
     );

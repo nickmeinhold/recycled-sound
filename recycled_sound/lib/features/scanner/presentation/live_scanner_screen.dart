@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -20,6 +21,11 @@ import 'widgets/capture_stack.dart';
 import 'widgets/feature_overlay_painter.dart';
 import 'widgets/progress_rail.dart';
 import 'widgets/scan_hud.dart';
+
+/// Debug log for scanner — compiled out in release builds.
+void _log(String message) {
+  if (kDebugMode) debugPrint('SCANNER: $message');
+}
 
 /// The scanner's lifecycle phases.
 enum _ScanPhase { booting, scanning, complete }
@@ -113,7 +119,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     // Pre-load model during boot sequence — catch errors so it doesn't
     // crash the app if the TFLite runtime is incompatible
     _brandClassifier.load().catchError((e) {
-      debugPrint('SCANNER: brand classifier failed to load: $e');
+      _log('brand classifier failed to load: $e');
     });
 
     _hintTimer = Timer(const Duration(seconds: 15), () {
@@ -178,7 +184,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
       // Log all available cameras to find the ultra-wide (macro-capable)
       for (final cam in cameras) {
-        debugPrint('SCANNER: camera: ${cam.name}, '
+        _log('camera: ${cam.name}, '
             'direction=${cam.lensDirection}, '
             'sensor=${cam.sensorOrientation}');
       }
@@ -189,14 +195,14 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       final backCameras = cameras
           .where((c) => c.lensDirection == CameraLensDirection.back)
           .toList();
-      debugPrint('SCANNER: ${backCameras.length} back cameras found');
+      _log('${backCameras.length} back cameras found');
 
       // Use the main wide camera for live preview.
       // The neural net doesn't need macro focus — it identifies brands
       // from visual appearance at normal viewing distance.
       // cameras.first is the default back camera (main wide lens).
       _camera = cameras.first;
-      debugPrint('SCANNER: selected camera: ${_camera!.name}');
+      _log('selected camera: ${_camera!.name}');
       _cameraController = CameraController(
         _camera!,
         ResolutionPreset.high,
@@ -216,7 +222,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         await _cameraController!.setFocusMode(FocusMode.auto);
         await _cameraController!.setFocusPoint(const Offset(0.5, 0.5));
       } catch (e) {
-        debugPrint('SCANNER: focus setup: $e');
+        _log('focus setup: $e');
       }
 
       await _cameraController!.startImageStream(_onCameraFrame);
@@ -241,7 +247,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   void _onCameraFrame(CameraImage image) {
     _frameCount++;
     if (_frameCount == 1 || _frameCount % 100 == 0) {
-      debugPrint('SCANNER: frame #$_frameCount received '
+      _log('frame #$_frameCount received '
           '(${image.width}x${image.height}, format=${image.format.group}, '
           'raw=${image.format.raw}, planes=${image.planes.length}, '
           'sensor=${_camera?.sensorOrientation})');
@@ -270,7 +276,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
       final inputImage = _buildInputImage(image);
       if (inputImage == null) {
-        debugPrint('SCANNER: _buildInputImage returned null — frame skipped');
+        _log('_buildInputImage returned null — frame skipped');
         return;
       }
 
@@ -280,7 +286,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       // Debug: log what ML Kit sees
       if (recognizedText.blocks.isEmpty) {
         if (_frameCount % 50 == 0) {
-          debugPrint('SCANNER: ML Kit returned 0 blocks (frame #$_frameCount)');
+          _log('ML Kit returned 0 blocks (frame #$_frameCount)');
         }
       }
       if (recognizedText.blocks.isNotEmpty) {
@@ -288,7 +294,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
             .expand((b) => b.lines)
             .map((l) => l.text)
             .join(' | ');
-        debugPrint('SCANNER: ML Kit found ${recognizedText.blocks.length} blocks: $texts');
+        _log('ML Kit found ${recognizedText.blocks.length} blocks: $texts');
       }
 
       final detections = <TextDetection>[];
@@ -304,7 +310,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
           if (_frameCount % 30 == 0) {
             final modelCheck = BrandMatcher.matchModelAnyBrand(text);
             final brandCheck = BrandMatcher.matchBrandDetailed(text);
-            debugPrint('SCANNER: text="$text" '
+            _log('text="$text" '
                 'modelMatch=${modelCheck != null ? "${modelCheck.brand}/${modelCheck.model}" : "none"} '
                 'brandMatch=${brandCheck?.displayName ?? "none"}');
           }
@@ -434,20 +440,20 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         }
       });
     } catch (e, st) {
-      debugPrint('SCANNER: _processFrame error: $e\n$st');
+      _log('_processFrame error: $e\n$st');
     }
   }
 
   InputImage? _buildInputImage(CameraImage image) {
     if (_camera == null) {
-      debugPrint('SCANNER: _camera is null');
+      _log('_camera is null');
       return null;
     }
 
     final sensorOrientation = _camera!.sensorOrientation;
     final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
     if (rotation == null) {
-      debugPrint('SCANNER: rotation null for sensorOrientation=$sensorOrientation');
+      _log('rotation null for sensorOrientation=$sensorOrientation');
       return null;
     }
 
@@ -457,13 +463,13 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     try {
       rawFormat = image.format.raw as int;
     } catch (e) {
-      debugPrint('SCANNER: format.raw cast failed: ${image.format.raw} (${image.format.raw.runtimeType})');
+      _log('format.raw cast failed: ${image.format.raw} (${image.format.raw.runtimeType})');
       return null;
     }
 
     final format = InputImageFormatValue.fromRawValue(rawFormat);
     if (format == null) {
-      debugPrint('SCANNER: format null for rawFormat=$rawFormat (group=${image.format.group})');
+      _log('format null for rawFormat=$rawFormat (group=${image.format.group})');
       return null;
     }
 
@@ -736,7 +742,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     if (_ocrCaptureInProgress || _cameraController == null) return;
     _ocrCaptureInProgress = true;
 
-    debugPrint('SCANNER: auto-capture triggered — running neural net + OCR');
+    _log('auto-capture triggered — running neural net + OCR');
 
     try {
       // Brief pause to capture a sharp still
@@ -755,12 +761,12 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       if (_brandClassifier.isLoaded && _detectedBrand == null) {
         try {
           final prediction = await _brandClassifier.classifyFile(xFile.path);
-          debugPrint('SCANNER: neural net → ${prediction.brand} '
+          _log('neural net → ${prediction.brand} '
               '(${(prediction.confidence * 100).toStringAsFixed(1)}%)');
 
           // Log top 3 for debugging
           for (final p in prediction.topN(3)) {
-            debugPrint('  ${p.brand}: ${(p.probability * 100).toStringAsFixed(1)}%');
+            _log('  ${p.brand}: ${(p.probability * 100).toStringAsFixed(1)}%');
           }
 
           if (prediction.confidence >= 0.4 && mounted) {
@@ -773,7 +779,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
             _showCrossReference(prediction.brand);
           }
         } catch (e) {
-          debugPrint('SCANNER: neural net error: $e');
+          _log('neural net error: $e');
         }
       }
 
@@ -783,7 +789,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
       if (_disposed || !mounted) return;
 
-      debugPrint('SCANNER: full-res OCR found '
+      _log('full-res OCR found '
           '${recognizedText.blocks.length} blocks');
 
       for (final block in recognizedText.blocks) {
@@ -791,20 +797,20 @@ class _LiveScanScreenState extends State<LiveScanScreen>
           final text = line.text.trim();
           if (text.isEmpty || text.length < 2) continue;
 
-          debugPrint('SCANNER: full-res text: "$text"');
+          _log('full-res text: "$text"');
 
           // Model-first detection (can also override neural net brand)
           if (_detectedModel == null) {
             final reverse = BrandMatcher.matchModelAnyBrand(text);
             if (reverse != null) {
-              debugPrint('SCANNER: OCR MODEL MATCH: '
+              _log('OCR MODEL MATCH: '
                   '${reverse.brand} / ${reverse.model}');
               setState(() {
                 _detectedModel = reverse.model;
                 // OCR model match is very reliable — override neural net
                 // brand if different
                 if (_detectedBrand != reverse.brand) {
-                  debugPrint('SCANNER: OCR overriding neural net brand '
+                  _log('OCR overriding neural net brand '
                       '$_detectedBrand → ${reverse.brand}');
                   _detectedBrand = reverse.brand;
                   _brandConfidence = 'FROM MODEL';
@@ -819,7 +825,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
           if (_detectedBrand == null) {
             final result = BrandMatcher.matchBrandDetailed(text);
             if (result != null) {
-              debugPrint('SCANNER: OCR BRAND MATCH: ${result.displayName}');
+              _log('OCR BRAND MATCH: ${result.displayName}');
               setState(() {
                 _detectedBrand = result.displayName;
                 _brandConfidence = result.confidenceLabel;
@@ -833,7 +839,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
           if (_detectedBrand != null && _detectedModel == null) {
             final model = BrandMatcher.matchModel(text, _detectedBrand!);
             if (model != null) {
-              debugPrint('SCANNER: OCR MODEL MATCH '
+              _log('OCR MODEL MATCH '
                   '(brand-specific): $model');
               setState(() => _detectedModel = model);
               HapticFeedback.mediumImpact();
@@ -856,7 +862,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         _fireCompletion();
       }
     } catch (e) {
-      debugPrint('SCANNER: auto-capture error: $e');
+      _log('auto-capture error: $e');
       // Resume stream if it failed
       if (mounted && _cameraController != null) {
         try {

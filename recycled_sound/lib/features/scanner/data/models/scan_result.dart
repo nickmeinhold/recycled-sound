@@ -180,6 +180,23 @@ class ScanResult {
         rawLabels: rawLabels ?? this.rawLabels,
       );
 
+  Map<String, dynamic> toJson() => {
+        'scanId': scanId,
+        'imageUrl': imageUrl,
+        'brand': brand.toJson(),
+        'model': model.toJson(),
+        'type': type.toJson(),
+        'year': year.toJson(),
+        'batterySize': batterySize.toJson(),
+        'domeType': domeType.toJson(),
+        'waxFilter': waxFilter.toJson(),
+        'receiver': receiver.toJson(),
+        if (colour != null) 'colour': colour!.toJson(),
+        if (tubing != null) 'tubing': tubing!.toJson(),
+        if (powerSource != null) 'powerSource': powerSource!.toJson(),
+        'rawLabels': rawLabels,
+      };
+
   factory ScanResult.fromJson(Map<String, dynamic> json) => ScanResult(
         scanId: json['scanId'] as String,
         imageUrl: json['imageUrl'] as String,
