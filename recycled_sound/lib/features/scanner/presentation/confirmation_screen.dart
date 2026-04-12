@@ -99,7 +99,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     pulseController: _pulseController,
                     onSave: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('brand', v),
+                        .updateField(ScanField.brand, v),
                   ),
 
                   // 2. MODEL — AI-filled, tap to correct
@@ -109,7 +109,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     pulseController: _pulseController,
                     onSave: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('model', v),
+                        .updateField(ScanField.model, v),
                   ),
 
                   // 3. STYLE — chip selector (CLIP probe @ 91.2%)
@@ -128,7 +128,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     aiConfidence: result.type.confidence,
                     onSelect: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('type', v),
+                        .updateField(ScanField.type, v),
                   ),
 
                   // 4. TUBING — chip selector (human only)
@@ -139,7 +139,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     pulseController: _pulseController,
                     onSelect: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('tubing', v),
+                        .updateField(ScanField.tubing, v),
                   ),
 
                   // 5. POWER — toggle (battery vs rechargeable)
@@ -150,7 +150,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     pulseController: _pulseController,
                     onSelect: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('powerSource', v),
+                        .updateField(ScanField.powerSource, v),
                   ),
 
                   // 6. BATTERY SIZE — chip selector (4 classes)
@@ -161,7 +161,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     pulseController: _pulseController,
                     onSelect: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('batterySize', v),
+                        .updateField(ScanField.batterySize, v),
                     enabled: result.powerSource?.value != 'Rechargeable',
                   ),
 
@@ -174,7 +174,7 @@ class _ConfirmationScreenState extends ConsumerState<ConfirmationScreen>
                     pulseController: _pulseController,
                     onSelect: (v) => ref
                         .read(scanResultProvider.notifier)
-                        .updateField('colour', v),
+                        .updateField(ScanField.colour, v),
                   ),
                 ],
               ),

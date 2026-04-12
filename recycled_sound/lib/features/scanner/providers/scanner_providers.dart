@@ -64,29 +64,13 @@ class ScanResultNotifier extends Notifier<ScanResult> {
   }
 
   /// Update a single spec field and record the correction with full context.
-  void updateField(String fieldName, String newValue) {
+  ///
+  /// Takes a [ScanField] enum — the compiler enforces exhaustive handling,
+  /// so adding a field to [ScanResult] without updating the read/write
+  /// switches is a compile error, not a silent bug.
+  void updateField(ScanField field, String newValue) {
     final current = state;
-    // Known field names — reject anything not in this set.
-    const knownFields = {
-      'brand', 'model', 'type', 'year', 'batterySize',
-      'domeType', 'waxFilter', 'receiver', 'colour', 'tubing', 'powerSource',
-    };
-    if (!knownFields.contains(fieldName)) return;
-
-    final oldField = switch (fieldName) {
-      'brand' => current.brand,
-      'model' => current.model,
-      'type' => current.type,
-      'year' => current.year,
-      'batterySize' => current.batterySize,
-      'domeType' => current.domeType,
-      'waxFilter' => current.waxFilter,
-      'receiver' => current.receiver,
-      'colour' => current.colour,
-      'tubing' => current.tubing,
-      'powerSource' => current.powerSource,
-      _ => null, // unreachable after guard above
-    };
+    final oldField = current.fieldFor(field);
 
     // For fields that start null (tubing, powerSource, colour),
     // record the correction from empty.
@@ -95,7 +79,7 @@ class ScanResultNotifier extends Notifier<ScanResult> {
     if (originalValue == newValue) return;
 
     _corrections.add(Correction(
-      field: fieldName,
+      field: field.name,
       originalValue: originalValue,
       originalConfidence: originalConfidence,
       correctedValue: newValue,
@@ -105,20 +89,7 @@ class ScanResultNotifier extends Notifier<ScanResult> {
 
     // Update the field with 100% confidence (human-corrected).
     final corrected = SpecField(value: newValue, confidence: 100);
-    state = switch (fieldName) {
-      'brand' => current.copyWith(brand: corrected),
-      'model' => current.copyWith(model: corrected),
-      'type' => current.copyWith(type: corrected),
-      'year' => current.copyWith(year: corrected),
-      'batterySize' => current.copyWith(batterySize: corrected),
-      'domeType' => current.copyWith(domeType: corrected),
-      'waxFilter' => current.copyWith(waxFilter: corrected),
-      'receiver' => current.copyWith(receiver: corrected),
-      'colour' => current.copyWith(colour: corrected),
-      'tubing' => current.copyWith(tubing: corrected),
-      'powerSource' => current.copyWith(powerSource: corrected),
-      _ => current,
-    };
+    state = current.withField(field, corrected);
   }
 
   /// Returns all corrections made during this session.

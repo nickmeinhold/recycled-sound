@@ -1,3 +1,22 @@
+/// Enumeration of all editable spec fields on a scan result.
+///
+/// Used by [ScanResultNotifier.updateField] so the compiler enforces
+/// exhaustive handling — adding a field to [ScanResult] without handling
+/// it in the read/write switches is a compile error, not a silent bug.
+enum ScanField {
+  brand,
+  model,
+  type,
+  year,
+  batterySize,
+  domeType,
+  waxFilter,
+  receiver,
+  colour,
+  tubing,
+  powerSource,
+}
+
 /// Represents a single identified spec field with its confidence score.
 class SpecField {
   const SpecField({required this.value, required this.confidence});
@@ -97,6 +116,36 @@ class ScanResult {
 
   /// Whether all 7 fields are filled.
   bool get isComplete => filledFieldCount == 7;
+
+  /// Read a field by enum. Returns null for optional fields that aren't set.
+  SpecField? fieldFor(ScanField f) => switch (f) {
+        ScanField.brand => brand,
+        ScanField.model => model,
+        ScanField.type => type,
+        ScanField.year => year,
+        ScanField.batterySize => batterySize,
+        ScanField.domeType => domeType,
+        ScanField.waxFilter => waxFilter,
+        ScanField.receiver => receiver,
+        ScanField.colour => colour,
+        ScanField.tubing => tubing,
+        ScanField.powerSource => powerSource,
+      };
+
+  /// Return a copy with one field replaced. Exhaustive — compiler-enforced.
+  ScanResult withField(ScanField f, SpecField value) => switch (f) {
+        ScanField.brand => copyWith(brand: value),
+        ScanField.model => copyWith(model: value),
+        ScanField.type => copyWith(type: value),
+        ScanField.year => copyWith(year: value),
+        ScanField.batterySize => copyWith(batterySize: value),
+        ScanField.domeType => copyWith(domeType: value),
+        ScanField.waxFilter => copyWith(waxFilter: value),
+        ScanField.receiver => copyWith(receiver: value),
+        ScanField.colour => copyWith(colour: value),
+        ScanField.tubing => copyWith(tubing: value),
+        ScanField.powerSource => copyWith(powerSource: value),
+      };
 
   ScanResult copyWith({
     String? scanId,
