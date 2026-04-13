@@ -7,9 +7,7 @@ void main() {
   group('EmbeddingSearch', () {
     test('findSimilar returns correct rankings for known vectors', () {
       // Create a small test database with 3 embeddings of 4 dims
-      final search = EmbeddingSearch.instance;
-
-      // We can't easily test loadFromAsset without Flutter's asset bundle,
+      // EmbeddingSearch.instance exists but needs Flutter's asset bundle,
       // but we can verify the similarity math with a direct test.
       // This test validates the cosine similarity algorithm.
 
