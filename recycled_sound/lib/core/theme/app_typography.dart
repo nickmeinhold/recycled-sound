@@ -40,4 +40,48 @@ abstract final class AppTypography {
       _base.copyWith(fontSize: 14, fontWeight: FontWeight.w600, height: 1.2);
   static TextStyle get nav =>
       _base.copyWith(fontSize: 9, fontWeight: FontWeight.w500, height: 1.2);
+
+  // ── Scanner / T2 HUD monospace ──────────────────────────────────────
+  // Used by the live scanner HUD and confirmation screen for the
+  // technical readout aesthetic.
+
+  static const _monoBase = TextStyle(fontFamily: 'monospace');
+
+  /// HUD field label (e.g. "MAKE", "COLOUR").
+  static TextStyle get monoLabel => _monoBase.copyWith(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: const Color(0xFF888888),
+      letterSpacing: 1.0);
+
+  /// HUD field value — detected.
+  static TextStyle get monoValue => _monoBase.copyWith(
+      fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 0.3);
+
+  /// HUD field value — large (confirmation screen).
+  static TextStyle get monoValueLarge => _monoBase.copyWith(
+      fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: 0.3);
+
+  /// HUD small text (cross-ref flash, badges).
+  static TextStyle get monoSmall => _monoBase.copyWith(
+      fontSize: 9,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.5);
+
+  /// HUD micro text (swatch labels, brand palette badge).
+  static TextStyle get monoMicro => _monoBase.copyWith(
+      fontSize: 8,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.8);
+
+  /// HUD status text (counter, button labels).
+  static TextStyle get monoStatus => _monoBase.copyWith(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 1.2);
+
+  /// HUD button/action text.
+  static TextStyle get monoButton => _monoBase.copyWith(
+      fontSize: 13,
+      fontWeight: FontWeight.w500);
 }

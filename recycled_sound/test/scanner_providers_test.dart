@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:recycled_sound/features/scanner/data/models/scan_result.dart';
 import 'package:recycled_sound/features/scanner/providers/scanner_providers.dart';
 
+// ScanField enum is exported from scan_result.dart
+
 void main() {
   group('ScanResultNotifier', () {
     late ProviderContainer container;
@@ -25,7 +27,7 @@ void main() {
 
     test('updateField changes value and sets confidence to 100', () {
       final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('brand', 'Oticon');
+      notifier.updateField(ScanField.brand, 'Oticon');
 
       final result = container.read(scanResultProvider);
       expect(result.brand.value, 'Oticon');
@@ -34,7 +36,7 @@ void main() {
 
     test('updateField records correction', () {
       final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('model', 'Real 1');
+      notifier.updateField(ScanField.model, 'Real 1');
 
       final corrections = notifier.corrections;
       expect(corrections, hasLength(1));
@@ -46,24 +48,20 @@ void main() {
 
     test('updateField with same value does nothing', () {
       final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('brand', 'Phonak'); // same as mock
+      notifier.updateField(ScanField.brand, 'Phonak'); // same as mock
 
       expect(notifier.corrections, isEmpty);
       expect(container.read(scanResultProvider).brand.value, 'Phonak');
     });
 
-    test('updateField with invalid field does nothing', () {
-      final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('nonexistent', 'value');
-
-      expect(notifier.corrections, isEmpty);
-    });
+    // Note: the old "invalid field does nothing" test is no longer needed —
+    // ScanField is an enum, so the compiler prevents invalid field names.
 
     test('multiple corrections are tracked in order', () {
       final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('brand', 'Signia');
-      notifier.updateField('type', 'BTE');
-      notifier.updateField('batterySize', '13');
+      notifier.updateField(ScanField.brand, 'Signia');
+      notifier.updateField(ScanField.type, 'BTE');
+      notifier.updateField(ScanField.batterySize, '13');
 
       final corrections = notifier.corrections;
       expect(corrections, hasLength(3));
@@ -74,7 +72,7 @@ void main() {
 
     test('corrections include raw labels from scan', () {
       final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('brand', 'Widex');
+      notifier.updateField(ScanField.brand, 'Widex');
 
       final correction = notifier.corrections.first;
       expect(correction.rawLabels, isNotEmpty);
@@ -84,7 +82,7 @@ void main() {
 
     test('correction toJson produces valid map', () {
       final notifier = container.read(scanResultProvider.notifier);
-      notifier.updateField('year', '2023');
+      notifier.updateField(ScanField.year, '2023');
 
       final json = notifier.corrections.first.toJson();
       expect(json['field'], 'year');

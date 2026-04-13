@@ -83,7 +83,7 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.brand,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('brand', v),
+                          .updateField(ScanField.brand, v),
                     ),
                     const Divider(),
                     _EditableSpecRow(
@@ -91,7 +91,7 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.model,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('model', v),
+                          .updateField(ScanField.model, v),
                     ),
                     const Divider(),
                     _EditableSpecRow(
@@ -99,15 +99,25 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.type,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('type', v),
+                          .updateField(ScanField.type, v),
                     ),
+                    if (result.colour != null) ...[
+                      const Divider(),
+                      _EditableSpecRow(
+                        label: 'Colour',
+                        field: result.colour!,
+                        onSave: (v) => ref
+                            .read(scanResultProvider.notifier)
+                            .updateField(ScanField.colour, v),
+                      ),
+                    ],
                     const Divider(),
                     _EditableSpecRow(
                       label: 'Year',
                       field: result.year,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('year', v),
+                          .updateField(ScanField.year, v),
                     ),
                   ],
                 ),
@@ -126,7 +136,7 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.batterySize,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('batterySize', v),
+                          .updateField(ScanField.batterySize, v),
                     ),
                     const Divider(),
                     _EditableSpecRow(
@@ -134,7 +144,7 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.domeType,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('domeType', v),
+                          .updateField(ScanField.domeType, v),
                     ),
                     const Divider(),
                     _EditableSpecRow(
@@ -142,7 +152,7 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.waxFilter,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('waxFilter', v),
+                          .updateField(ScanField.waxFilter, v),
                     ),
                     const Divider(),
                     _EditableSpecRow(
@@ -150,7 +160,7 @@ class ResultsScreen extends ConsumerWidget {
                       field: result.receiver,
                       onSave: (v) => ref
                           .read(scanResultProvider.notifier)
-                          .updateField('receiver', v),
+                          .updateField(ScanField.receiver, v),
                     ),
                   ],
                 ),

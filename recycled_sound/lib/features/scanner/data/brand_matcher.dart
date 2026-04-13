@@ -61,6 +61,9 @@ class BrandMatcher {
     'blamey & saunders': 'Blamey Saunders',
     'specsavers': 'Specsavers Advance',
     'hearing australia': 'Hearing Australia',
+    // Demant group brands
+    'sonic': 'Sonic',
+    'sonic innovations': 'Sonic',
   };
 
   /// Minimum text length to attempt matching. Short strings produce
@@ -107,6 +110,41 @@ class BrandMatcher {
       if (dist <= _maxDistance) {
         return BrandMatchResult(
             displayName: entry.value, distance: dist, matchType: 'FUZZY');
+      }
+    }
+
+    return null;
+  }
+
+  /// Reverse-lookup: given OCR text, check if it matches a known model
+  /// across ALL brands. Returns (brand, modelText) if found.
+  ///
+  /// This allows model text like "moxi2 kiss" to identify both the brand
+  /// (Unitron) and the model, even when the brand name isn't visible.
+  ///
+  /// More conservative than brand-specific matching — only matches
+  /// distinctive model names (5+ chars) to avoid false positives like
+  /// random text matching "nera", "key", "own", etc.
+  static ({String brand, String model})? matchModelAnyBrand(String text) {
+    final normalized = text.trim();
+    if (normalized.length < 4 || normalized.length > 30) return null;
+    final lower = normalized.toLowerCase();
+
+    for (final entry in _modelPatterns.entries) {
+      final brandKey = entry.key;
+      for (final pattern in entry.value) {
+        // Exact substring: 4+ chars is reliable (catches "moxi" in "moxi2 kiss")
+        if (pattern.length >= 4 && lower.contains(pattern)) {
+          final brandName = _brands[brandKey];
+          if (brandName == null) continue;
+          return (brand: brandName, model: normalized);
+        }
+        // Fuzzy: 5+ chars only to avoid false positives on short words
+        if (pattern.length >= 5 && _levenshtein(lower, pattern) <= 1) {
+          final brandName = _brands[brandKey];
+          if (brandName == null) continue;
+          return (brand: brandName, model: normalized);
+        }
       }
     }
 
@@ -165,6 +203,10 @@ class BrandMatcher {
     ],
     'beltone': [
       'achieve', 'imagine', 'amaze', 'rely',
+    ],
+    'sonic': [
+      'captivate', 'enchant', 'celebrate', 'cheer', 'bliss',
+      'joy', 'charm', 'radiance', 'pep', 'flip',
     ],
   };
 

@@ -76,7 +76,7 @@ class _AnalysingScreenState extends ConsumerState<AnalysingScreen>
 
       // Set the real result in the provider
       ref.read(scanResultProvider.notifier).setResult(result);
-      context.pushReplacement('/scan/results', extra: result.scanId);
+      context.pushReplacement('/scan/confirm');
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());

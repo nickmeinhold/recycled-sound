@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 BASE_URL = "https://unaudinary.com"
+FIREBASE_BUCKET = "gs://recycled-sound-app.firebasestorage.app/training-data/images/"
 DATA_DIR = Path(__file__).parent
 IMAGE_DIR = DATA_DIR / "images"
 URLS_FILE = DATA_DIR / "raw" / "image_urls.json"
@@ -116,5 +117,22 @@ async def main():
     print(f"   Manifest: {manifest_path} ({len(manifest)} entries)")
 
 
+def restore_from_firebase():
+    """Restore training images from Firebase Storage backup.
+
+    Use this if unaudinary.com is down. Requires gsutil and GCP auth.
+    Usage: python3 download_images.py --from-firebase
+    """
+    print(f"🔥 Restoring from Firebase Storage...")
+    print(f"   Source: {FIREBASE_BUCKET}")
+    print(f"   Destination: {IMAGE_DIR}")
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    os.system(f"gsutil -m rsync -r {FIREBASE_BUCKET} {IMAGE_DIR}/")
+    print("✅ Done!")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    if "--from-firebase" in sys.argv:
+        restore_from_firebase()
+    else:
+        asyncio.run(main())
