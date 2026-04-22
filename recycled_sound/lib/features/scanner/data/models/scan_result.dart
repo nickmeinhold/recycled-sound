@@ -90,18 +90,18 @@ class ScanResult {
             (key: 'brand', label: 'Make', field: brand, aiAssisted: true),
             (key: 'model', label: 'Model', field: model, aiAssisted: true),
             (key: 'type', label: 'Style', field: type, aiAssisted: true),
-            (key: 'tubing', label: 'Tubing', field: tubing, aiAssisted: false),
+            (key: 'tubing', label: 'Tubing', field: tubing, aiAssisted: true),
             (
               key: 'powerSource',
               label: 'Power',
               field: powerSource,
-              aiAssisted: false,
+              aiAssisted: true,
             ),
             (
               key: 'batterySize',
               label: 'Battery Size',
               field: batterySize,
-              aiAssisted: false,
+              aiAssisted: true,
             ),
             (key: 'colour', label: 'Colour', field: colour, aiAssisted: true),
           ];

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// Whether a detection is a confirmed match or ambient (unmatched) text.
@@ -35,9 +37,23 @@ class SnapEvent {
   int get ageMs => DateTime.now().difference(timestamp).inMilliseconds;
 }
 
+/// A catalog cascade event — triggers the data stream animation when
+/// the device catalog fills in fields.
+class CascadeEvent {
+  CascadeEvent({required this.field, required this.value})
+      : timestamp = DateTime.now();
+
+  final String field;
+  final String value;
+  final DateTime timestamp;
+
+  int get ageMs => DateTime.now().difference(timestamp).inMilliseconds;
+}
+
 /// Paints overlays on detected text regions:
 /// - **Matched**: green corner brackets with label (brand/model identified)
 /// - **Ambient**: dim amber brackets (scanner is reading but no match yet)
+/// - **Data stream**: horizontal lines sweeping down during catalog cascade
 ///
 /// The ambient detections show the scanner is alive and working — reading
 /// serial numbers, regulatory marks, everything — before a match lands.
@@ -49,6 +65,7 @@ class FeatureOverlayPainter extends CustomPainter {
     required this.sensorOrientation,
     required this.animationValue,
     this.snapEvents = const [],
+    this.cascadeEvents = const [],
   });
 
   final List<TextDetection> detections;
@@ -62,21 +79,42 @@ class FeatureOverlayPainter extends CustomPainter {
   /// Active snap events — draws trailing borders for captures in progress.
   final List<SnapEvent> snapEvents;
 
+  /// Active cascade events — draws data stream for catalog fills.
+  final List<CascadeEvent> cascadeEvents;
+
   // Colors
   static const _matchedColor = Color(0xFF10B981); // success green
   static const _ambientColor = Color(0xFFD97706); // warm amber
+  static const _cascadeColor = Color(0xFF60A5FA); // data blue
+  static const _cascadeGreen = Color(0xFF34D399); // bright green
+
+  /// Pseudo-random fragments for the data stream effect.
+  static const _dataFragments = [
+    'BTE', 'RIC', 'ITE', 'CIC', '312', '13', '675', '10',
+    'RECHG', 'SLIM', 'STD', 'NONE', '2024', '2023', '2022',
+    'PREMIUM', 'ADVANCED', 'ESSENTIAL', 'AURACAST', 'BT LE',
+    '0x4F', '0xA3', '>>>', '===', '|||', '...', '###',
+    'QUERY', 'MATCH', 'INDEX', 'FETCH', 'RESOLVE', 'CONFIRM',
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw snap ripple effects (underneath everything)
+    // Draw data stream effect (behind everything else)
+    for (final cascade in cascadeEvents) {
+      final age = cascade.ageMs;
+      if (age > 1200) continue; // 1.2s animation
+      _drawDataStream(canvas, size, cascade, age / 1200.0);
+    }
+
+    // Draw snap ripple effects
     for (final snap in snapEvents) {
       final age = snap.ageMs;
-      if (age > 500) continue; // expire after 500ms
+      if (age > 500) continue;
       final rect = _transformRect(snap.boundingBox, size);
       _drawSnapRipple(canvas, rect, age / 500.0);
     }
 
-    // Always draw a centre scanning reticle — the T2 "I'm looking" signal
+    // Always draw a centre scanning reticle
     _drawScanReticle(canvas, size);
 
     if (detections.isEmpty) return;
@@ -99,6 +137,122 @@ class FeatureOverlayPainter extends CustomPainter {
     }
   }
 
+  /// Data stream animation — horizontal scan lines sweep down the screen
+  /// with monospace text fragments streaming past. Represents the catalog
+  /// lookup happening in real-time.
+  void _drawDataStream(
+      Canvas canvas, Size size, CascadeEvent event, double progress) {
+    final rng = math.Random(event.field.hashCode);
+
+    // Phase 1 (0.0–0.4): scan lines sweep down
+    // Phase 2 (0.3–0.7): field name + value resolve in centre
+    // Phase 3 (0.6–1.0): everything fades out
+
+    // ── Scan lines ──────────────────────────────────────────────────────
+    if (progress < 0.6) {
+      final lineAlpha = progress < 0.4
+          ? (progress / 0.4) // fade in
+          : 1.0 - ((progress - 0.4) / 0.2); // fade out
+
+      final linePaint = Paint()
+        ..color = _cascadeColor.withValues(alpha: lineAlpha * 0.15)
+        ..strokeWidth = 1.0;
+
+      // 8 scan lines sweeping down at different speeds
+      for (var i = 0; i < 8; i++) {
+        final speed = 0.6 + rng.nextDouble() * 0.8;
+        final offset = rng.nextDouble() * 0.3;
+        final y = ((progress * speed + offset) % 1.0) * size.height;
+        canvas.drawLine(
+          Offset(0, y),
+          Offset(size.width, y),
+          linePaint,
+        );
+      }
+    }
+
+    // ── Streaming text fragments ────────────────────────────────────────
+    if (progress < 0.7) {
+      final fragAlpha = progress < 0.1
+          ? progress / 0.1
+          : progress > 0.5
+              ? 1.0 - ((progress - 0.5) / 0.2)
+              : 1.0;
+
+      // 12 random text fragments at various positions
+      for (var i = 0; i < 12; i++) {
+        final x = rng.nextDouble() * size.width;
+        final baseY = rng.nextDouble() * size.height;
+        // Fragments drift downward
+        final y = baseY + progress * 60.0 * (0.5 + rng.nextDouble());
+
+        if (y > size.height || y < 0) continue;
+
+        final fragment = _dataFragments[rng.nextInt(_dataFragments.length)];
+        final tp = TextPainter(
+          text: TextSpan(
+            text: fragment,
+            style: TextStyle(
+              color: _cascadeColor.withValues(alpha: fragAlpha * 0.4),
+              fontSize: 9,
+              fontWeight: FontWeight.w500,
+              fontFamily: 'monospace',
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        tp.paint(canvas, Offset(x, y));
+      }
+    }
+
+    // ── Central resolve: field name + value ──────────────────────────────
+    if (progress > 0.2 && progress < 1.0) {
+      final resolveAlpha = progress < 0.4
+          ? (progress - 0.2) / 0.2 // fade in
+          : progress > 0.8
+              ? 1.0 - ((progress - 0.8) / 0.2) // fade out
+              : 1.0; // full
+
+      final cx = size.width / 2;
+      final cy = size.height * 0.38;
+
+      // Background pill
+      final pillPaint = Paint()
+        ..color = const Color(0xFF000000).withValues(alpha: resolveAlpha * 0.7);
+      final pillRect = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(cx, cy), width: 200, height: 28),
+        const Radius.circular(14),
+      );
+      canvas.drawRRect(pillRect, pillPaint);
+
+      // Border
+      final borderPaint = Paint()
+        ..color = _cascadeGreen.withValues(alpha: resolveAlpha * 0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+      canvas.drawRRect(pillRect, borderPaint);
+
+      // Text: "STYLE → BTE" or "BATTERY → 312"
+      final label = '${event.field} → ${event.value}';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: label,
+          style: TextStyle(
+            color: _cascadeGreen.withValues(alpha: resolveAlpha),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'monospace',
+            letterSpacing: 1.5,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      tp.paint(canvas, Offset(cx - tp.width / 2, cy - tp.height / 2));
+    }
+  }
+
   Rect _transformRect(Rect rect, Size widgetSize) {
     // On iOS, ML Kit returns bounding boxes already in display-oriented
     // coordinates (it applies the InputImageRotation internally). So we only
@@ -118,13 +272,13 @@ class FeatureOverlayPainter extends CustomPainter {
   /// each fading as the animation progresses. Like a radar ping.
   void _drawSnapRipple(Canvas canvas, Rect rect, double progress) {
     for (var i = 1; i <= 3; i++) {
-      final expand = i * 4.0 * progress; // pixels of expansion
-      final opacity = (1.0 - progress) * (1.0 - i * 0.25); // fade with time + trail depth
+      final expand = i * 4.0 * progress;
+      final opacity = (1.0 - progress) * (1.0 - i * 0.25);
       if (opacity <= 0) continue;
 
       final paint = Paint()
         ..color = _matchedColor.withValues(alpha: opacity * 0.8)
-        ..strokeWidth = 2.0 - (i * 0.4) // thinner trails
+        ..strokeWidth = 2.0 - (i * 0.4)
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round;
 
@@ -150,7 +304,6 @@ class FeatureOverlayPainter extends CustomPainter {
     final cy = size.height / 2;
     final side = size.shortestSide * 0.35;
 
-    // Visible breathing effect
     final breath = 1.0 + 0.06 * animationValue;
     final rect = Rect.fromCenter(
       center: Offset(cx, cy),
@@ -158,10 +311,10 @@ class FeatureOverlayPainter extends CustomPainter {
       height: side * breath,
     );
 
-    final opacity = 0.2 + 0.4 * animationValue; // 0.2 → 0.6
+    final opacity = 0.2 + 0.4 * animationValue;
     final paint = Paint()
       ..color = _ambientColor.withValues(alpha: opacity)
-      ..strokeWidth = 1.5 + 1.0 * animationValue // 1.5 → 2.5
+      ..strokeWidth = 1.5 + 1.0 * animationValue
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
@@ -169,7 +322,6 @@ class FeatureOverlayPainter extends CustomPainter {
   }
 
   void _drawAmbientBrackets(Canvas canvas, Rect rect) {
-    // Dim, thin, barely there — the scanner is reading
     final opacity = 0.15 + 0.1 * animationValue;
     final paint = Paint()
       ..color = _ambientColor.withValues(alpha: opacity)

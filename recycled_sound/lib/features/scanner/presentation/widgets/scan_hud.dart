@@ -3,33 +3,60 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 
-/// Bottom HUD panel for the live scanner.
+/// A single field in the 7-field HUD.
+class HudField {
+  const HudField({
+    required this.label,
+    required this.value,
+    this.confidence,
+    this.colourRgb,
+    this.colourConfidence = 0.0,
+    this.colourConfirmed = false,
+    this.onTap,
+  });
+
+  /// Field label shown on the left, e.g. "MAKE", "STYLE".
+  final String label;
+
+  /// Detected value, or null if not yet detected.
+  final String? value;
+
+  /// Optional confidence label, e.g. "EXACT", "85% AI".
+  final String? confidence;
+
+  /// For the COLOUR field — the swatch colour.
+  final Color? colourRgb;
+
+  /// For the COLOUR field — confidence 0.0–1.0 while building.
+  final double colourConfidence;
+
+  /// For the COLOUR field — whether locked.
+  final bool colourConfirmed;
+
+  /// Called when the user taps this field (e.g. colour picker).
+  final VoidCallback? onTap;
+
+  bool get isDetected => value != null && value!.isNotEmpty;
+}
+
+/// Bottom HUD panel for the live scanner — 7-field audiologist model.
 ///
-/// Shows detected features with confidence labels, cross-reference
-/// status, and contextual guidance. Visual treatment: frosted dark
-/// panel with monospace readout.
+/// Shows all 7 fields from Seray's identification model:
+/// Make, Model, Style, Tubing, Power, Battery Size, Colour.
+/// Unfilled fields are dimmed placeholders. Detected fields light up green.
 class ScanHud extends StatelessWidget {
   const ScanHud({
     super.key,
-    required this.detectedBrand,
-    required this.detectedModel,
-    required this.brandConfidence,
+    required this.fields,
     required this.crossRefText,
     required this.showHint,
     required this.onReview,
     required this.onFallback,
-    this.detectedColour,
-    this.detectedColourRgb,
-    this.colourConfidence = 0.0,
-    this.colourConfirmed = false,
-    this.onColourTap,
+    required this.totalScans,
   });
 
-  final String? detectedBrand;
-  final String? detectedModel;
-
-  /// Confidence label for brand match: "EXACT" or "FUZZY ≤1".
-  final String? brandConfidence;
+  /// The 7 fields to display.
+  final List<HudField> fields;
 
   /// Transient cross-reference text, e.g. "23 OTICON DEVICES IN DATABASE".
   final String? crossRefText;
@@ -38,24 +65,14 @@ class ScanHud extends StatelessWidget {
   final VoidCallback onReview;
   final VoidCallback onFallback;
 
-  /// Detected colour name from the stabiliser, e.g. "Champagne".
-  final String? detectedColour;
+  /// Total scans this user has completed. Controls hint graduation.
+  final int totalScans;
 
-  /// The palette reference colour for the swatch.
-  final Color? detectedColourRgb;
+  bool get _hasDetections => fields.any((f) => f.isDetected);
+  bool get _hasBrand => fields.isNotEmpty && fields[0].isDetected;
 
-  /// Colour detection confidence 0.0–1.0 (fills over ~8 frames).
-  final double colourConfidence;
-
-  /// Whether the colour has reached consensus or been manually confirmed.
-  final bool colourConfirmed;
-
-  /// Called when the user taps the colour row to open the picker.
-  final VoidCallback? onColourTap;
-
-  bool get _hasDetections =>
-      detectedBrand != null || detectedModel != null || detectedColour != null;
-  bool get _isComplete => detectedBrand != null && detectedModel != null;
+  /// How many of the 7 fields are filled.
+  int get _filledCount => fields.where((f) => f.isDetected).length;
 
   @override
   Widget build(BuildContext context) {
@@ -89,50 +106,50 @@ class ScanHud extends StatelessWidget {
               ),
             ),
 
-          // Detection readout
-          if (_hasDetections) ...[
-            _FeatureRow(
-              field: 'MAKE',
-              value: detectedBrand,
-              detected: detectedBrand != null,
-              confidence: brandConfidence,
-            ),
-            const SizedBox(height: 4),
-            _FeatureRow(
-              field: 'MODEL',
-              value: detectedModel,
-              detected: detectedModel != null,
-            ),
-            if (detectedColour != null) ...[
-              const SizedBox(height: 4),
-              _ColourRow(
-                colour: detectedColour!,
-                colourRgb: detectedColourRgb,
-                confidence: colourConfidence,
-                confirmed: colourConfirmed,
-                onTap: onColourTap,
-              ),
-            ],
-            const SizedBox(height: 12),
+          // 7-field readout
+          for (var i = 0; i < fields.length; i++) ...[
+            if (i > 0) const SizedBox(height: 3),
+            _FieldRow(field: fields[i], index: i),
           ],
 
-          // Instruction / hint
-          if (!_hasDetections && !showHint)
+          const SizedBox(height: 8),
+
+          // Field count badge
+          if (_hasDetections)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '$_filledCount/7 FIELDS IDENTIFIED',
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: _filledCount == 7
+                      ? AppColors.success
+                      : const Color(0x66FFFFFF),
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+
+          // Instruction / hint — graduated by totalScans
+          if (!_hasDetections && !showHint && totalScans <= 10)
             Text(
-              'Slowly rotate the hearing aid',
+              totalScans <= 3 ? 'Slowly rotate the hearing aid' : 'Scanning…',
               style: AppTypography.bodySmall.copyWith(
                 color: AppColors.white.withValues(alpha: 0.7),
               ),
             ),
 
-          if (!_hasDetections && showHint) ...[
-            Text(
-              'Try holding closer',
-              style: AppTypography.bodySmall.copyWith(
-                color: AppColors.white.withValues(alpha: 0.7),
+          if (!_hasDetections && showHint && totalScans <= 10) ...[
+            if (totalScans <= 3)
+              Text(
+                'Try holding closer',
+                style: AppTypography.bodySmall.copyWith(
+                  color: AppColors.white.withValues(alpha: 0.7),
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
+            if (totalScans <= 3) const SizedBox(height: 4),
             GestureDetector(
               onTap: onFallback,
               child: Text(
@@ -146,16 +163,16 @@ class ScanHud extends StatelessWidget {
             ),
           ],
 
-          if (_hasDetections && !_isComplete)
+          if (_hasDetections && !_hasBrand && totalScans <= 3)
             Text(
-              'Keep rotating for model',
+              'Keep rotating for more fields',
               style: AppTypography.caption.copyWith(
                 color: AppColors.white.withValues(alpha: 0.5),
               ),
             ),
 
-          // Review button
-          if (_isComplete) ...[
+          // Review button — available once brand is detected
+          if (_hasBrand) ...[
             const SizedBox(height: 4),
             SizedBox(
               width: double.infinity,
@@ -180,186 +197,146 @@ class ScanHud extends StatelessWidget {
   }
 }
 
-/// A single feature row in the HUD readout.
-class _FeatureRow extends StatelessWidget {
-  const _FeatureRow({
-    required this.field,
-    required this.value,
-    required this.detected,
-    this.confidence,
-  });
+/// A single field row in the 7-field HUD.
+///
+/// Detected fields show a green check + value. Undetected fields show
+/// a dim circle + placeholder dots. Colour field has a swatch + confidence ring.
+class _FieldRow extends StatelessWidget {
+  const _FieldRow({required this.field, required this.index});
 
-  final String field;
-  final String? value;
-  final bool detected;
-
-  /// Optional confidence label, e.g. "EXACT" or "FUZZY ≤1".
-  final String? confidence;
+  final HudField field;
+  final int index;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(
-          detected ? Icons.check_circle : Icons.radio_button_unchecked,
-          size: 16,
-          color: detected
-              ? AppColors.success
-              : AppColors.white.withValues(alpha: 0.3),
-        ),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 52,
-          child: Text(
-            field,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: Color(0x99FFFFFF),
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value ?? '- - -',
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              fontWeight: detected ? FontWeight.w600 : FontWeight.w400,
-              color: detected ? AppColors.success : const Color(0x44FFFFFF),
-              letterSpacing: 0.3,
-            ),
-          ),
-        ),
-        // Confidence badge
-        if (detected && confidence != null)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(3),
-              color: const Color(0x33FFFFFF),
-            ),
-            child: Text(
-              confidence!,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: Color(0x99FFFFFF),
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
+    final detected = field.isDetected;
+    final isColour = field.label == 'COLOUR';
 
-/// Colour detection row with swatch and tap-to-confirm interaction.
-class _ColourRow extends StatelessWidget {
-  const _ColourRow({
-    required this.colour,
-    required this.colourRgb,
-    required this.confidence,
-    required this.confirmed,
-    this.onTap,
-  });
-
-  final String colour;
-  final Color? colourRgb;
-  final double confidence;
-  final bool confirmed;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: confirmed ? onTap : null, // Only tappable once confirmed (to correct)
-      child: Row(
-        children: [
-          // Status: filling circle while building confidence, checkmark when done
-          if (confirmed)
-            const Icon(Icons.check_circle, size: 16, color: AppColors.success)
-          else
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                value: confidence,
-                strokeWidth: 2,
-                color: AppColors.success,
-                backgroundColor: const Color(0x33FFFFFF),
-              ),
-            ),
-          const SizedBox(width: 8),
-          // Field label
-          const SizedBox(
-            width: 52,
-            child: Text(
-              'COLOUR',
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: Color(0x99FFFFFF),
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-          // Colour swatch — opacity grows with confidence
-          if (colourRgb != null) ...[
-            Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: colourRgb!.withValues(alpha: 0.4 + 0.6 * confidence),
-                borderRadius: BorderRadius.circular(3),
-                border: Border.all(
-                  color: const Color(0x55FFFFFF),
-                  width: 1,
+      onTap: field.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedOpacity(
+        opacity: detected ? 1.0 : 0.4,
+        duration: const Duration(milliseconds: 300),
+        child: Row(
+          children: [
+            // Status icon
+            if (isColour && !field.colourConfirmed && field.colourRgb != null)
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  value: field.colourConfidence,
+                  strokeWidth: 2,
+                  color: AppColors.success,
+                  backgroundColor: const Color(0x33FFFFFF),
                 ),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          // Colour name — opacity grows with confidence
-          Expanded(
-            child: Text(
-              colour,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                fontWeight: confirmed ? FontWeight.w600 : FontWeight.w400,
-                color: confirmed
+              )
+            else
+              Icon(
+                detected
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
+                size: 16,
+                color: detected
                     ? AppColors.success
-                    : AppColors.success.withValues(
-                        alpha: 0.3 + 0.7 * confidence),
-                letterSpacing: 0.3,
+                    : AppColors.white.withValues(alpha: 0.3),
               ),
-            ),
-          ),
-          // Edit badge — only after confirmed
-          if (confirmed)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(3),
-                color: const Color(0x33FFFFFF),
-              ),
-              child: const Text(
-                'EDIT',
-                style: TextStyle(
+            const SizedBox(width: 8),
+
+            // Field label
+            SizedBox(
+              width: 72,
+              child: Text(
+                field.label,
+                style: const TextStyle(
                   fontFamily: 'monospace',
-                  fontSize: 9,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
                   color: Color(0x99FFFFFF),
                   letterSpacing: 0.5,
                 ),
               ),
             ),
-        ],
+
+            // Colour swatch (colour field only)
+            if (isColour && field.colourRgb != null) ...[
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: field.colourRgb!.withValues(
+                    alpha: 0.4 + 0.6 * field.colourConfidence,
+                  ),
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(
+                    color: const Color(0x55FFFFFF),
+                    width: 1,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+
+            // Value or placeholder
+            Expanded(
+              child: Text(
+                detected ? field.value! : '· · ·',
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  fontWeight: detected ? FontWeight.w600 : FontWeight.w400,
+                  color: detected
+                      ? AppColors.success
+                      : const Color(0x33FFFFFF),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+
+            // Confidence badge
+            if (detected && field.confidence != null)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  color: const Color(0x33FFFFFF),
+                ),
+                child: Text(
+                  field.confidence!,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0x99FFFFFF),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+
+            // Edit badge for confirmed colour
+            if (isColour && field.colourConfirmed)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  color: const Color(0x33FFFFFF),
+                ),
+                child: const Text(
+                  'EDIT',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0x99FFFFFF),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

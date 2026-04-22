@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,11 +15,20 @@ import '../../../core/theme/app_typography.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 
+import '../data/models/scan_result.dart';
+import '../providers/scanner_providers.dart';
+
 import '../data/brand_classifier.dart';
 import '../data/brand_matcher.dart';
+import '../data/device_catalog.dart';
 import '../data/colour_classifier.dart';
+import '../data/frame_preprocessor.dart';
+import '../data/insight_engine.dart';
+import '../data/scan_tracker.dart';
+import 'widgets/capture_animator.dart';
 import 'widgets/capture_stack.dart';
 import 'widgets/feature_overlay_painter.dart';
+import 'widgets/insight_strip.dart';
 import 'widgets/progress_rail.dart';
 import 'widgets/scan_hud.dart';
 
@@ -65,6 +75,13 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   List<TextDetection> _liveDetections = [];
   Size _imageSize = Size.zero;
 
+  // ── Catalog cascade fields (filled from DeviceCatalog on brand+model) ─
+  String? _detectedStyle;
+  String? _detectedTubing;
+  String? _detectedPower;
+  String? _detectedBatterySize;
+  bool _catalogLookedUp = false;
+
   // ── Phase & animation ─────────────────────────────────────────────────
   _ScanPhase _phase = _ScanPhase.booting;
   late final AnimationController _pulseController;
@@ -84,12 +101,31 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   Color? _detectedColourRgb;
   double _colourConfidence = 0.0;
   bool _colourConfirmed = false;
-  final ColourStabiliser _colourStabiliser = ColourStabiliser();
+  bool _ocrHasSeenText = false; // gate: colour waits for OCR evidence
+  final ColourStabiliser _colourStabiliser = ColourStabiliser(
+    bufferSize: 12,
+    threshold: 8, // 8/12 consensus — stricter than 5/8 for muted palette
+  );
 
   // ── Captures & upload ──────────────────────────────────────────────
   final List<CapturedFeature> _captures = [];
   final List<SnapEvent> _snapEvents = [];
+  final List<CascadeEvent> _cascadeEvents = [];
+  final List<CaptureAnimation> _captureAnimations = [];
+  final List<DockThumbnail> _dockedThumbnails = [];
   bool _isCapturing = false;
+
+  // ── Preprocessing filter (auto-cycles each frame) ───────────────────
+  PreprocessFilter _activeFilter = PreprocessFilter.none;
+
+  /// Which filter most recently produced a brand or model detection.
+  PreprocessFilter? _bestFilter;
+
+  // ── Proactive insights ───────────────────────────────────────────────
+  List<Insight> _insights = [];
+
+  // ── Graduated hint suppression ──────────────────────────────────────
+  int _totalScans = 0;
 
   // ── Timing ────────────────────────────────────────────────────────────
   Timer? _hintTimer;
@@ -120,6 +156,17 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     // crash the app if the TFLite runtime is incompatible
     _brandClassifier.load().catchError((e) {
       _log('brand classifier failed to load: $e');
+    });
+
+    // Pre-load device catalog for cascade fill
+    DeviceCatalog.instance.loadFromAsset().catchError((e) {
+      _log('device catalog failed to load: $e');
+    });
+
+    // Load scan count for hint graduation
+    ScanTracker.getTotalScans().then((count) {
+      if (mounted) setState(() => _totalScans = count);
+      _log('hint graduation: $count previous scans');
     });
 
     _hintTimer = Timer(const Duration(seconds: 15), () {
@@ -260,10 +307,14 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   Future<void> _processFrame(CameraImage image) async {
     try {
       // Colour sampling — runs on raw bytes, sub-millisecond.
-      // Runs before ML Kit so colour updates even on frames where OCR is slow.
+      // Gated: only starts once ML Kit has found at least one text block,
+      // which means something interesting (a hearing aid) is in frame.
+      // Without this gate, the stabiliser locks onto desk/skin/background
+      // colours before the device is even positioned.
       if (Platform.isIOS &&
           image.planes.isNotEmpty &&
-          !_colourConfirmed) {
+          !_colourConfirmed &&
+          _ocrHasSeenText) {
         final sampled = ColourClassifier.sampleFromBgra8888(
           bytes: image.planes[0].bytes,
           width: image.width,
@@ -274,7 +325,19 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         _colourStabiliser.push(match.name, match.reference);
       }
 
-      final inputImage = _buildInputImage(image);
+      // Auto-cycle filter each frame: RAW → ENHANCE → HI-CON → OCR → …
+      // Once we have both brand+model, stop cycling (lock on current).
+      if (_detectedBrand == null || _detectedModel == null) {
+        _activeFilter = _activeFilter.next;
+      }
+
+      final Stopwatch? filterWatch =
+          kDebugMode ? (Stopwatch()..start()) : null;
+      final inputImage = _buildInputImage(image, applyFilter: true);
+      if (filterWatch != null && _frameCount % 100 == 0) {
+        _log('frame prep (${_activeFilter.label}): '
+            '${filterWatch.elapsedMicroseconds}µs');
+      }
       if (inputImage == null) {
         _log('_buildInputImage returned null — frame skipped');
         return;
@@ -290,6 +353,10 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         }
       }
       if (recognizedText.blocks.isNotEmpty) {
+        if (!_ocrHasSeenText) {
+          _ocrHasSeenText = true;
+          _log('OCR gate opened — colour sampling enabled');
+        }
         final texts = recognizedText.blocks
             .expand((b) => b.lines)
             .map((l) => l.text)
@@ -328,7 +395,16 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 type: DetectionType.matched,
               ));
               _detectedModel = reverse.model;
+              _bestFilter = _activeFilter;
               HapticFeedback.mediumImpact();
+              _log('MODEL detected via filter ${_activeFilter.label}');
+              ScanTracker.recordDetection(
+                field: 'MODEL',
+                value: reverse.model,
+                filter: _activeFilter.label,
+                colour: _detectedColour,
+                matchType: 'from_model_reverse',
+              );
               _captureSnapshot('MODEL', reverse.model, line.boundingBox);
               wasMatched = true;
 
@@ -337,6 +413,14 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 _detectedBrand = reverse.brand;
                 _brandConfidence = 'FROM MODEL';
                 HapticFeedback.mediumImpact();
+                ScanTracker.recordDetection(
+                  field: 'BRAND',
+                  value: reverse.brand,
+                  filter: _activeFilter.label,
+                  colour: _detectedColour,
+                  confidence: 'FROM MODEL',
+                  matchType: 'from_model_reverse',
+                );
                 _showCrossReference(reverse.brand);
                 // No separate snapshot for brand — the model capture covers it
               }
@@ -354,7 +438,17 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               ));
               _detectedBrand = result.displayName;
               _brandConfidence = result.confidenceLabel;
+              _bestFilter ??= _activeFilter;
               HapticFeedback.mediumImpact();
+              _log('BRAND detected via filter ${_activeFilter.label}');
+              ScanTracker.recordDetection(
+                field: 'BRAND',
+                value: result.displayName,
+                filter: _activeFilter.label,
+                colour: _detectedColour,
+                confidence: result.confidenceLabel,
+                matchType: 'ocr',
+              );
               _showCrossReference(result.displayName);
               _captureSnapshot('MAKE', result.displayName, line.boundingBox);
               wasMatched = true;
@@ -383,6 +477,13 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               ));
               _detectedModel = model;
               HapticFeedback.mediumImpact();
+              ScanTracker.recordDetection(
+                field: 'MODEL',
+                value: model,
+                filter: _activeFilter.label,
+                colour: _detectedColour,
+                matchType: 'ocr',
+              );
               _captureSnapshot('MODEL', model, line.boundingBox);
               wasMatched = true;
             }
@@ -444,7 +545,10 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     }
   }
 
-  InputImage? _buildInputImage(CameraImage image) {
+  InputImage? _buildInputImage(
+    CameraImage image, {
+    bool applyFilter = false,
+  }) {
     if (_camera == null) {
       _log('_camera is null');
       return null;
@@ -473,8 +577,24 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       return null;
     }
 
+    var bytes = _concatenatePlanes(image);
+
+    // Apply preprocessing filter to the OCR input if requested.
+    // Colour sampling runs on raw bytes upstream — only OCR gets filtered.
+    if (applyFilter &&
+        _activeFilter != PreprocessFilter.none &&
+        Platform.isIOS) {
+      bytes = FramePreprocessor.apply(
+        bytes: bytes,
+        width: image.width,
+        height: image.height,
+        bytesPerRow: image.planes.first.bytesPerRow,
+        filter: _activeFilter,
+      );
+    }
+
     return InputImage.fromBytes(
-      bytes: _concatenatePlanes(image),
+      bytes: bytes,
       metadata: InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
@@ -503,9 +623,22 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     // Record snap event for the ripple animation
     _snapEvents.add(SnapEvent(boundingBox: bbox, label: label));
 
+    // Transform bbox from image space to screen space for the capture animation
+    final screenSize = MediaQuery.of(context).size;
+    final scaleX = screenSize.width / _imageSize.width;
+    final scaleY = screenSize.height / _imageSize.height;
+    final screenRect = Rect.fromLTRB(
+      bbox.left * scaleX,
+      bbox.top * scaleY,
+      bbox.right * scaleX,
+      bbox.bottom * scaleY,
+    );
+
+    final animId = '${field}_${DateTime.now().millisecondsSinceEpoch}';
+
     // Create the capture entry
     final capture = CapturedFeature(
-      id: '${field}_${DateTime.now().millisecondsSinceEpoch}',
+      id: animId,
       label: label,
       field: field,
     );
@@ -516,6 +649,29 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       await _cameraController!.stopImageStream();
       final xFile = await _cameraController!.takePicture();
       capture.imagePath = xFile.path;
+
+      // Fire the capture animation with the image
+      setState(() {
+        _captureAnimations.add(CaptureAnimation(
+          id: animId,
+          sourceRect: screenRect,
+          label: label,
+          imagePath: xFile.path,
+        ));
+      });
+
+      // After animation completes (~1050ms), dock the thumbnail
+      Future.delayed(const Duration(milliseconds: 1100), () {
+        if (!mounted) return;
+        setState(() {
+          _captureAnimations.removeWhere((a) => a.id == animId);
+          _dockedThumbnails.add(DockThumbnail(
+            id: animId,
+            label: label,
+            imagePath: xFile.path,
+          ));
+        });
+      });
 
       // Resume stream immediately
       if (mounted && _cameraController != null) {
@@ -573,20 +729,6 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     }
   }
 
-  /// Overall upload progress across all captures.
-  double get _overallProgress {
-    if (_captures.isEmpty) return 0.0;
-    var total = 0.0;
-    for (final c in _captures) {
-      total += switch (c.state) {
-        CaptureState.done => 1.0,
-        CaptureState.uploading => c.uploadProgress,
-        CaptureState.error => 1.0,
-        _ => 0.0,
-      };
-    }
-    return total / _captures.length;
-  }
 
   // ── Cross-reference flash ─────────────────────────────────────────────
 
@@ -618,14 +760,105 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
   void _fireCompletion() {
     HapticFeedback.heavyImpact();
+    ScanTracker.incrementLocalScanCount();
     setState(() {
       _showCompletion = true;
       _phase = _ScanPhase.complete;
+      _totalScans++;
     });
 
     Timer(const Duration(seconds: 2), () {
       if (mounted) setState(() => _showCompletion = false);
     });
+
+    // Cascade-fill remaining fields from device catalog
+    _catalogCascade();
+
+    // Generate proactive insights for the detected device
+    _generateInsights();
+  }
+
+  // ── Catalog cascade — fill 7 fields from database ────────────────────
+
+  /// Look up the detected brand+model in the device catalog and fill
+  /// style, tubing, power source, and battery size with a staggered
+  /// cascade animation.
+  Future<void> _catalogCascade() async {
+    if (_catalogLookedUp) return;
+    if (_detectedBrand == null) return;
+    _catalogLookedUp = true;
+
+    final catalog = DeviceCatalog.instance;
+    if (!catalog.isLoaded) {
+      _log('catalog not loaded — skipping cascade');
+      return;
+    }
+
+    final device = catalog.findByName(_detectedBrand!, _detectedModel ?? '');
+    if (device == null) {
+      _log('catalog: no match for $_detectedBrand / $_detectedModel');
+      return;
+    }
+
+    _log('catalog match: ${device.name} '
+        '(type=${device.type}, battery=${device.batterySize})');
+
+    // Cascade fields with staggered timing for visual effect.
+    // Each field pops in ~200ms after the last with a haptic tick.
+    final fields = <(String, void Function())>[
+      if (_detectedStyle == null && device.type != 'Unknown')
+        ('STYLE', () => _detectedStyle = device.type),
+      if (_detectedPower == null)
+        ('POWER', () {
+          _detectedPower = device.batterySize.toLowerCase() == 'rechargeable'
+              ? 'Rechargeable'
+              : 'Battery';
+        }),
+      if (_detectedBatterySize == null && device.batterySize != 'Unknown')
+        ('BATTERY', () => _detectedBatterySize = device.batterySize),
+      if (_detectedTubing == null)
+        ('TUBING', () {
+          // Infer tubing from style: BTE uses tubes, RIC/ITE/CIC/IIC don't
+          final t = device.type.toUpperCase();
+          if (t == 'BTE') {
+            _detectedTubing = 'Standard';
+          } else if (t == 'RIC' || t == 'ITE' || t == 'CIC' ||
+              t == 'ITC' || t == 'IIC') {
+            _detectedTubing = 'None';
+          }
+        }),
+    ];
+
+    for (var i = 0; i < fields.length; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (_disposed || !mounted) return;
+
+      final (label, apply) = fields[i];
+      apply();
+      _cascadeEvents.add(CascadeEvent(field: label, value: _cascadeValue(label)));
+      setState(() {});
+      HapticFeedback.selectionClick();
+      _log('cascade: $label filled');
+    }
+  }
+
+  Future<void> _generateInsights() async {
+    if (_detectedBrand == null) return;
+
+    try {
+      final insights = await InsightEngine.generate(
+        brand: _detectedBrand!,
+        model: _detectedModel,
+        colour: _detectedColour,
+      );
+
+      if (mounted && insights.isNotEmpty) {
+        setState(() => _insights = insights);
+        _log('insights: ${insights.map((i) => i.text).join(' | ')}');
+      }
+    } catch (e) {
+      _log('insight generation failed: $e');
+    }
   }
 
   // ── Colour picker ────────────────────────────────────────────────────
@@ -776,6 +1009,14 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                   '${(prediction.confidence * 100).round()}% AI';
             });
             HapticFeedback.mediumImpact();
+            ScanTracker.recordDetection(
+              field: 'BRAND',
+              value: prediction.brand,
+              filter: _activeFilter.label,
+              colour: _detectedColour,
+              confidence: '${(prediction.confidence * 100).round()}% AI',
+              matchType: 'neural_net',
+            );
             _showCrossReference(prediction.brand);
           }
         } catch (e) {
@@ -805,6 +1046,9 @@ class _LiveScanScreenState extends State<LiveScanScreen>
             if (reverse != null) {
               _log('OCR MODEL MATCH: '
                   '${reverse.brand} / ${reverse.model}');
+              final overriddenBrand = _detectedBrand != reverse.brand
+                  ? _detectedBrand
+                  : null;
               setState(() {
                 _detectedModel = reverse.model;
                 // OCR model match is very reliable — override neural net
@@ -817,21 +1061,46 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 }
               });
               HapticFeedback.mediumImpact();
+              ScanTracker.recordDetection(
+                field: 'MODEL',
+                value: reverse.model,
+                filter: _activeFilter.label,
+                colour: _detectedColour,
+                matchType: 'full_res_ocr',
+              );
+              // Track the override as a correction — neural net was wrong
+              if (overriddenBrand != null) {
+                ScanTracker.recordCorrection(
+                  field: 'BRAND',
+                  originalValue: overriddenBrand,
+                  correctedValue: reverse.brand,
+                );
+              }
               _showCrossReference(_detectedBrand!);
             }
           }
 
-          // Brand matching from OCR (if neural net didn't find it)
-          if (_detectedBrand == null) {
+          // Brand matching from OCR — OCR text is stronger evidence
+          // than neural net visual classification, so it can override.
+          {
             final result = BrandMatcher.matchBrandDetailed(text);
-            if (result != null) {
-              _log('OCR BRAND MATCH: ${result.displayName}');
+            if (result != null && result.displayName != _detectedBrand) {
+              final overriddenBrand = _detectedBrand;
+              _log('OCR BRAND MATCH: ${result.displayName}'
+                  '${overriddenBrand != null ? ' (overriding neural net: $overriddenBrand)' : ''}');
               setState(() {
                 _detectedBrand = result.displayName;
                 _brandConfidence = result.confidenceLabel;
               });
               HapticFeedback.mediumImpact();
               _showCrossReference(result.displayName);
+              if (overriddenBrand != null) {
+                ScanTracker.recordCorrection(
+                  field: 'BRAND',
+                  originalValue: overriddenBrand,
+                  correctedValue: result.displayName,
+                );
+              }
             }
           }
 
@@ -876,21 +1145,53 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
   // ── Actions ───────────────────────────────────────────────────────────
 
-  Future<void> _captureAndReview() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return;
-    }
-    try {
-      await _cameraController!.stopImageStream();
-      final xFile = await _cameraController!.takePicture();
-      if (mounted) {
-        context.push('/scan/analysing', extra: xFile.path);
-      }
-    } catch (e) {
-      if (mounted && _cameraController != null) {
-        _cameraController!.startImageStream(_onCameraFrame);
-      }
-    }
+  /// Navigate directly to results with the on-device detection data.
+  /// Skips the old cloud analysis flow — everything is already identified.
+  void _captureAndReview() {
+    if (!mounted) return;
+
+    // Build a ScanResult from everything the scanner detected
+    final scanId = 'scan_${DateTime.now().millisecondsSinceEpoch}';
+    final result = ScanResult(
+      scanId: scanId,
+      imageUrl: '',
+      brand: SpecField(
+        value: _detectedBrand ?? '',
+        confidence: _detectedBrand != null ? 85 : 0,
+      ),
+      model: SpecField(
+        value: _detectedModel ?? '',
+        confidence: _detectedModel != null ? 80 : 0,
+      ),
+      type: SpecField(
+        value: _detectedStyle ?? '',
+        confidence: _detectedStyle != null ? 75 : 0,
+      ),
+      year: const SpecField(value: '', confidence: 0),
+      batterySize: SpecField(
+        value: _detectedBatterySize ?? '',
+        confidence: _detectedBatterySize != null ? 70 : 0,
+      ),
+      domeType: const SpecField(value: '', confidence: 0),
+      waxFilter: const SpecField(value: '', confidence: 0),
+      receiver: const SpecField(value: '', confidence: 0),
+      colour: _detectedColour != null
+          ? SpecField(value: _detectedColour!, confidence: 85)
+          : null,
+      tubing: _detectedTubing != null
+          ? SpecField(value: _detectedTubing!, confidence: 60)
+          : null,
+      powerSource: _detectedPower != null
+          ? SpecField(value: _detectedPower!, confidence: 70)
+          : null,
+    );
+
+    // Push to the provider so the results screen picks it up
+    ProviderScope.containerOf(context)
+        .read(scanResultProvider.notifier)
+        .setResult(result);
+
+    context.push('/scan/results', extra: scanId);
   }
 
   Future<void> _takePhoto() async {
@@ -921,6 +1222,71 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       context.push('/scan/analysing', extra: image.path);
     }
   }
+
+  /// Get the current value for a cascade field label.
+  String _cascadeValue(String label) => switch (label) {
+        'STYLE' => _detectedStyle ?? '',
+        'TUBING' => _detectedTubing ?? '',
+        'POWER' => _detectedPower ?? '',
+        'BATTERY' => _detectedBatterySize ?? '',
+        _ => '',
+      };
+
+  // ── 7-field HUD helpers ────────────────────────────────────────────────
+
+  /// How many of the 7 audiologist fields are filled.
+  int get _filledFieldCount {
+    var count = 0;
+    if (_detectedBrand != null) count++;
+    if (_detectedModel != null) count++;
+    if (_detectedStyle != null) count++;
+    if (_detectedTubing != null) count++;
+    if (_detectedPower != null) count++;
+    if (_detectedBatterySize != null) count++;
+    if (_detectedColour != null) count++;
+    return count;
+  }
+
+  /// Build the 7 HudField entries for the ScanHud widget.
+  List<HudField> _buildHudFields() => [
+        HudField(
+          label: 'MAKE',
+          value: _detectedBrand,
+          confidence: _brandConfidence,
+        ),
+        HudField(
+          label: 'MODEL',
+          value: _detectedModel,
+        ),
+        HudField(
+          label: 'STYLE',
+          value: _detectedStyle,
+          confidence: _detectedStyle != null ? 'CATALOG' : null,
+        ),
+        HudField(
+          label: 'TUBING',
+          value: _detectedTubing,
+          confidence: _detectedTubing != null ? 'INFERRED' : null,
+        ),
+        HudField(
+          label: 'POWER',
+          value: _detectedPower,
+          confidence: _detectedPower != null ? 'CATALOG' : null,
+        ),
+        HudField(
+          label: 'BAT SIZE',
+          value: _detectedBatterySize,
+          confidence: _detectedBatterySize != null ? 'CATALOG' : null,
+        ),
+        HudField(
+          label: 'COLOUR',
+          value: _detectedColour,
+          colourRgb: _detectedColourRgb,
+          colourConfidence: _colourConfidence,
+          colourConfirmed: _colourConfirmed,
+          onTap: _colourConfirmed ? _showColourPicker : null,
+        ),
+      ];
 
   // ── Build ─────────────────────────────────────────────────────────────
 
@@ -954,6 +1320,50 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               ),
             ),
 
+            // Filter status badge (top-right) — shows which filter is
+            // currently being tried. Once a detection lands, shows the
+            // winning filter with a green accent.
+            if (_phase == _ScanPhase.scanning)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 8,
+                right: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _bestFilter != null
+                        ? AppColors.success.withValues(alpha: 0.7)
+                        : const Color(0x44FFFFFF),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _bestFilter != null
+                            ? Icons.auto_fix_high
+                            : Icons.tune,
+                        size: 14,
+                        color: AppColors.white.withValues(
+                            alpha: _bestFilter != null ? 1.0 : 0.6),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _bestFilter?.label ?? _activeFilter.label,
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.white.withValues(
+                              alpha: _bestFilter != null ? 1.0 : 0.6),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
             // Feature overlay (green + amber boxes + snap ripples)
             // Always show when scanning — the overlay IS the T2 experience
             if (_phase != _ScanPhase.booting)
@@ -968,35 +1378,42 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                       sensorOrientation: _camera?.sensorOrientation ?? 0,
                       animationValue: _pulseController.value,
                       snapEvents: _snapEvents,
+                      cascadeEvents: _cascadeEvents,
                     ),
                   ),
                 ),
               ),
 
-            // Progress rail (left edge)
-            if (_captures.isNotEmpty)
+            // Progress rail (left edge) — shows filled fields out of 7
+            if (_filledFieldCount > 0)
               Positioned(
                 left: 12,
                 top: MediaQuery.of(context).padding.top + 60,
                 child: ProgressRail(
-                  progress: _overallProgress,
-                  captureCount: _captures.length,
-                  totalExpected: 2, // brand + model
+                  progress: _filledFieldCount / 7,
+                  captureCount: _filledFieldCount,
+                  totalExpected: 7,
                 ),
               ),
 
-            // Capture stack (right edge)
-            if (_captures.isNotEmpty)
-              Positioned(
-                right: 12,
-                top: MediaQuery.of(context).padding.top + 60,
-                child: CaptureStack(captures: _captures),
+            // Capture animations + thumbnail dock
+            if (_captureAnimations.isNotEmpty ||
+                _dockedThumbnails.isNotEmpty)
+              Positioned.fill(
+                child: CaptureAnimatorOverlay(
+                  animations: _captureAnimations,
+                  dockedThumbnails: _dockedThumbnails,
+                  dockPosition: Offset(
+                    MediaQuery.of(context).size.width - 60,
+                    MediaQuery.of(context).size.height - 200,
+                  ),
+                ),
               ),
 
             // Completion overlay
             if (_showCompletion) _buildCompletionOverlay(),
 
-            // Bottom HUD + capture controls
+            // Bottom HUD + insights + capture controls
             if (_phase != _ScanPhase.booting && _cameraReady)
               Positioned(
                 left: 0,
@@ -1005,19 +1422,16 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Proactive insights — appears above HUD when detected
+                    if (_insights.isNotEmpty)
+                      InsightStrip(insights: _insights),
                     ScanHud(
-                      detectedBrand: _detectedBrand,
-                      detectedModel: _detectedModel,
-                      brandConfidence: _brandConfidence,
+                      fields: _buildHudFields(),
                       crossRefText: _crossRefText,
                       showHint: _showHint,
                       onReview: _captureAndReview,
                       onFallback: _pickFromGallery,
-                      detectedColour: _detectedColour,
-                      detectedColourRgb: _detectedColourRgb,
-                      colourConfidence: _colourConfidence,
-                      colourConfirmed: _colourConfirmed,
-                      onColourTap: _showColourPicker,
+                      totalScans: _totalScans,
                     ),
                     Container(
                       color: Colors.black,
