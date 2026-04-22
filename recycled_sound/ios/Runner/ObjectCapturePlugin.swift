@@ -99,7 +99,15 @@ class ObjectCapturePlugin {
             viewFactoryRegistered = true
         }
 
-        // Observe state via async sequence
+        // Return immediately so Flutter can proceed — session starts async
+        result(nil)
+
+        // Start the session
+        var config = ObjectCaptureSession.Configuration()
+        config.isOverCaptureEnabled = false
+        session.start(imagesDirectory: dir, configuration: config)
+
+        // Observe state via async sequence (after start so initial state fires)
         stateTask = Task { [weak self] in
             for await state in session.stateUpdates {
                 guard let self = self else { return }
@@ -133,13 +141,6 @@ class ObjectCapturePlugin {
                 ])
             }
         }
-
-        // Start the session
-        var config = ObjectCaptureSession.Configuration()
-        config.isOverCaptureEnabled = false
-        session.start(imagesDirectory: dir, configuration: config)
-
-        result(nil)
     }
 
     private func startCapture(result: @escaping FlutterResult) {

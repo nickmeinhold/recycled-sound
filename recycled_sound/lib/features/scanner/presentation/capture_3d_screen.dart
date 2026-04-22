@@ -68,9 +68,13 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
       });
     }
     if (supported) {
-      // Start the session — this also registers the native platform view
-      await _capture.startSession();
+      // Show the native view immediately, start session in parallel
       if (mounted) setState(() => _sessionStarted = true);
+      try {
+        await _capture.startSession();
+      } catch (e) {
+        if (mounted) setState(() => _guidance = 'Session error: $e');
+      }
     }
   }
 
