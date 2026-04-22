@@ -1188,6 +1188,9 @@ PODS:
     - abseil/meta/type_traits
     - abseil/xcprivacy
   - abseil/xcprivacy (1.20240722.0)
+  - arkit_plugin (0.0.1):
+    - Flutter
+    - GLTFSceneKit
   - BoringSSL-GRPC (0.0.37):
     - BoringSSL-GRPC/Implementation (= 0.0.37)
     - BoringSSL-GRPC/Interface (= 0.0.37)
@@ -1286,6 +1289,7 @@ PODS:
     - GoogleUtilities/Environment (~> 8.1)
     - GTMSessionFetcher/Core (< 5.0, >= 3.4)
   - Flutter (1.0.0)
+  - GLTFSceneKit (0.3.0)
   - google_mlkit_commons (0.11.1):
     - Flutter
     - MLKitVision (~> 10.0.0)
@@ -1478,6 +1482,7 @@ PODS:
     - TensorFlowLiteSwift/Metal (= 2.12.0)
 
 DEPENDENCIES:
+  - arkit_plugin (from `.symlinks/plugins/arkit_plugin/ios`)
   - camera_avfoundation (from `.symlinks/plugins/camera_avfoundation/ios`)
   - cloud_firestore (from `.symlinks/plugins/cloud_firestore/ios`)
   - cloud_functions (from `.symlinks/plugins/cloud_functions/ios`)
@@ -1507,6 +1512,7 @@ SPEC REPOS:
     - FirebaseMessagingInterop
     - FirebaseSharedSwift
     - FirebaseStorage
+    - GLTFSceneKit
     - GoogleDataTransport
     - GoogleMLKit
     - GoogleToolboxForMac
@@ -1527,6 +1533,8 @@ SPEC REPOS:
     - TensorFlowLiteSwift
 
 EXTERNAL SOURCES:
+  arkit_plugin:
+    :path: ".symlinks/plugins/arkit_plugin/ios"
   camera_avfoundation:
     :path: ".symlinks/plugins/camera_avfoundation/ios"
   cloud_firestore:
@@ -1552,6 +1560,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   abseil: a05cc83bf02079535e17169a73c5be5ba47f714b
+  arkit_plugin: 498422c16fb9465f45bce2391ec73dbb3c69453c
   BoringSSL-GRPC: dded2a44897e45f28f08ae87a55ee4bcd19bc508
   camera_avfoundation: 281867ff09f1da66f031a184ecfbc6f2e625c9f5
   cloud_firestore: 97e42181866db3cba3fe3935895ab779b6acacd6
@@ -1573,6 +1582,7 @@ SPEC CHECKSUMS:
   FirebaseSharedSwift: e17c654ef1f1a616b0b33054e663ad1035c8fd40
   FirebaseStorage: 50fc9ee147392943e492467db6b52759b0447037
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  GLTFSceneKit: d1b437c514ba2aed5555afb0fddd64e030612d57
   google_mlkit_commons: 1e6ef6605d7281f35baf2b355e6049b9984fd624
   google_mlkit_text_recognition: 309a3a493765ea17c7368cadb4a710391e73902c
   GoogleDataTransport: aae35b7ea0c09004c3797d53c8c41f66f219d6a7
@@ -1596,6 +1606,6 @@ SPEC CHECKSUMS:
   TensorFlowLiteSwift: 3a4928286e9e35bdd3e17970f48e53c80d25e793
   tflite_flutter: 9433d086a3060431bbc9f3c7c20d017db0e72d08
 
-PODFILE CHECKSUM: 3b656f0f4c966a0a610ec622e26f670df13eb350
+PODFILE CHECKSUM: 291d47a9f6f9fe8c866fe13c43329576c13891d6
 
 COCOAPODS: 1.16.2
