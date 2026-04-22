@@ -7,20 +7,17 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../data/point_cloud.dart';
+import 'widgets/ar_point_overlay_painter.dart';
 import 'widgets/point_cloud_viewer.dart';
 
 /// 3D capture screen — uses LiDAR depth tracking to build a real-time
-/// point cloud of the hearing aid, which can then be spun with your finger.
+/// point cloud of the hearing aid, rendered directly ON the AR camera view.
 ///
-/// Flow:
-/// 1. ARKit depth session starts with LiDAR
-/// 2. Depth frames are captured periodically (~5 fps)
-/// 3. Points accumulate as user orbits the device
-/// 4. When done, switches to interactive point cloud viewer
+/// Points materialize on the surface of the real object as the LiDAR
+/// captures depth data. Move the camera and the points stay anchored.
 class Capture3dScreen extends StatefulWidget {
   const Capture3dScreen({super.key, this.deviceName});
 
-  /// Optional device name from the scanner, e.g. "Oticon Nera2 Pro".
   final String? deviceName;
 
   @override
@@ -34,15 +31,21 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
   // Fine voxel grid (0.5mm) for small objects at close range
   final _cloud = PointCloudBuilder(maxPoints: 80000, voxelSize: 0.0005);
   Timer? _captureTimer;
+  Timer? _projectionTimer;
   _CapturePhase _phase = _CapturePhase.scanning;
   int _framesCaptured = 0;
   String _status = 'Initialising LiDAR...';
   bool _disposed = false;
 
+  // Camera matrices for AR overlay projection
+  Matrix4 _viewMatrix = Matrix4.identity();
+  Matrix4 _projectionMatrix = Matrix4.identity();
+
   @override
   void dispose() {
     _disposed = true;
     _captureTimer?.cancel();
+    _projectionTimer?.cancel();
     _arkitController?.dispose();
     super.dispose();
   }
@@ -51,10 +54,34 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
     _arkitController = controller;
     setState(() => _status = 'Point at the hearing aid and slowly orbit');
 
-    // Capture depth frames every 200ms (~5 fps)
+    // Capture depth frames every 200ms (~5 fps) — heavy, builds the cloud
     _captureTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       _captureDepthFrame();
     });
+
+    // Update projection every 66ms (~15 fps) — light, just matrix fetch + repaint
+    _projectionTimer = Timer.periodic(const Duration(milliseconds: 66), (_) {
+      _updateProjection();
+    });
+  }
+
+  /// Fetch current camera matrices for AR overlay rendering.
+  Future<void> _updateProjection() async {
+    if (_disposed || _arkitController == null) return;
+    if (_phase != _CapturePhase.scanning) return;
+
+    try {
+      final pov = await _arkitController!.pointOfViewTransform();
+      final proj = await _arkitController!.cameraProjectionMatrix();
+
+      if (pov != null && proj != null && mounted) {
+        setState(() {
+          // View matrix = inverse of camera world transform
+          _viewMatrix = Matrix4.copy(pov)..invert();
+          _projectionMatrix = proj;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _captureDepthFrame() async {
@@ -77,7 +104,6 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
 
       if (depthList == null || depthWidth == null || depthHeight == null) return;
 
-      // Parse depth data
       final Float32List depthData;
       if (depthList is Float32List) {
         depthData = depthList;
@@ -89,7 +115,6 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
         return;
       }
 
-      // Parse intrinsics: "fx fy cx cy" format
       double fx = 500, fy = 500;
       double cx = depthWidth / 2, cy = depthHeight / 2;
       if (intrinsics != null) {
@@ -106,7 +131,6 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
         }
       }
 
-      // Get camera pose
       final pov = await _arkitController!.pointOfViewTransform();
       final cameraPose = pov ?? Matrix4.identity();
 
@@ -124,8 +148,7 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
       if (!_disposed && mounted) {
         setState(() {
           _framesCaptured++;
-          _status =
-              '${_cloud.count} points from $_framesCaptured frames';
+          _status = '${_cloud.count} points from $_framesCaptured frames';
         });
       }
     } catch (e) {
@@ -137,6 +160,7 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
 
   void _finishScanning() {
     _captureTimer?.cancel();
+    _projectionTimer?.cancel();
     setState(() {
       _phase = _CapturePhase.viewing;
       _status = '${_cloud.count} points — spin it!';
@@ -152,7 +176,7 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // AR camera view (scanning phase) or point cloud (viewing phase)
+            // AR camera view (scanning) or interactive point cloud (viewing)
             if (_phase == _CapturePhase.scanning)
               ARKitSceneView(
                 configuration: ARKitConfiguration.depthTracking,
@@ -164,27 +188,15 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
                 pointSize: 2.5,
               ),
 
-            // Live point cloud overlay during scanning
+            // AR point cloud overlay — points rendered ON the real object
             if (_phase == _CapturePhase.scanning && _cloud.count > 0)
-              Positioned(
-                right: 0,
-                top: MediaQuery.of(context).padding.top + 50,
-                width: 160,
-                height: 160,
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: AppColors.primary.withValues(alpha: 0.4),
-                      width: 1,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
-                    child: PointCloudViewer(
-                      cloud: _cloud,
-                      pointSize: 1.5,
-                      autoRotate: true,
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: ArPointOverlayPainter(
+                      points: _cloud.points,
+                      viewMatrix: _viewMatrix,
+                      projectionMatrix: _projectionMatrix,
                     ),
                   ),
                 ),
@@ -249,7 +261,6 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Status
                     Text(
                       _status.toUpperCase(),
                       style: const TextStyle(
@@ -261,7 +272,6 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Point count bar
                     if (_phase == _CapturePhase.scanning) ...[
                       ClipRRect(
                         borderRadius: BorderRadius.circular(2),
@@ -277,7 +287,6 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Action button
                     if (_phase == _CapturePhase.scanning &&
                         _cloud.count > 5000)
                       SizedBox(
@@ -310,10 +319,16 @@ class _Capture3dScreenState extends State<Capture3dScreen> {
                                   _phase = _CapturePhase.scanning;
                                   _framesCaptured = 0;
                                   _status = 'Point at the hearing aid';
+                                  _viewMatrix = Matrix4.identity();
+                                  _projectionMatrix = Matrix4.identity();
                                 });
                                 _captureTimer = Timer.periodic(
                                   const Duration(milliseconds: 200),
                                   (_) => _captureDepthFrame(),
+                                );
+                                _projectionTimer = Timer.periodic(
+                                  const Duration(milliseconds: 66),
+                                  (_) => _updateProjection(),
                                 );
                               },
                               icon: const Icon(Icons.refresh, size: 18),
