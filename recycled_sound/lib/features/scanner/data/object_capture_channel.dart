@@ -58,9 +58,16 @@ class ObjectCaptureChannel {
   }
 
   /// Whether Object Capture is supported on this device.
+  /// Times out after 3 seconds — if the native plugin hasn't registered
+  /// its handler yet, we fall back gracefully.
   Future<bool> isSupported() async {
     try {
-      final result = await _channel.invokeMethod<bool>('isSupported');
+      final result = await _channel
+          .invokeMethod<bool>('isSupported')
+          .timeout(const Duration(seconds: 3), onTimeout: () {
+        debugPrint('ObjectCapture: isSupported timed out');
+        return false;
+      });
       return result ?? false;
     } on MissingPluginException catch (e) {
       debugPrint('ObjectCapture: MissingPluginException — $e');

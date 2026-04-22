@@ -25,17 +25,20 @@ class ObjectCapturePlugin {
 
     nonisolated init(messenger: FlutterBinaryMessenger) {
         self.messenger = messenger
+        // Channel and handler must be set up synchronously so they're
+        // ready before Flutter calls isSupported. The handler dispatches
+        // to @MainActor internally.
         let channel = FlutterMethodChannel(
             name: "recycled_sound/object_capture",
             binaryMessenger: messenger
         )
+        channel.setMethodCallHandler { call, result in
+            Task { @MainActor [weak self] in
+                self?.handle(call, result: result)
+            }
+        }
         Task { @MainActor in
             self.channel = channel
-            channel.setMethodCallHandler { [weak self] call, result in
-                Task { @MainActor in
-                    self?.handle(call, result: result)
-                }
-            }
         }
     }
 
