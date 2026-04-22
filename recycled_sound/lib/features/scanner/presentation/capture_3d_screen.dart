@@ -31,7 +31,8 @@ enum _CapturePhase { scanning, viewing }
 
 class _Capture3dScreenState extends State<Capture3dScreen> {
   ARKitController? _arkitController;
-  final _cloud = PointCloudBuilder(maxPoints: 60000, voxelSize: 0.001);
+  // Fine voxel grid (0.5mm) for small objects at close range
+  final _cloud = PointCloudBuilder(maxPoints: 80000, voxelSize: 0.0005);
   Timer? _captureTimer;
   _CapturePhase _phase = _CapturePhase.scanning;
   int _framesCaptured = 0;

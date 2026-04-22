@@ -88,14 +88,17 @@ class PointCloudBuilder {
     int imageWidth = 0,
     int imageHeight = 0,
   }) {
-    // Subsample — take every Nth pixel for performance
-    final step = math.max(4, math.sqrt(depthWidth * depthHeight / 2000).round());
+    // Subsample — take every Nth pixel. Smaller step = more detail.
+    // At close range (15-50cm) we want fine detail for small objects.
+    final step = math.max(2, math.sqrt(depthWidth * depthHeight / 5000).round());
 
     for (var py = 0; py < depthHeight; py += step) {
       for (var px = 0; px < depthWidth; px += step) {
         final depth = depthData[py * depthWidth + px];
         if (depth.isNaN || depth.isInfinite) continue;
-        if (depth <= 0.01 || depth > 2.0) continue; // skip invalid/far
+        // Only capture 15–50cm — hand-held distance.
+        // Cuts out desk, walls, background. Focuses on the hearing aid.
+        if (depth <= 0.15 || depth > 0.50) continue;
 
         // Back-project to camera space
         final camX = (px - cx) * depth / fx;
