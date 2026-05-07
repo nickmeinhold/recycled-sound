@@ -68,11 +68,13 @@ python3 data/test_pipeline.py /path/to/folder/ --json    # machine-readable
 ```
 Requires: `google-cloud-vision`, `open_clip`, `torch`, `chromadb`. Uses ADC credentials — set `quota_project_id` to `recycled-sound-app`.
 
-### Next Steps for Scanner
-- [ ] Multi-photo flow: overview → text close-up → (battery door?) → confirmation screen
-- [ ] Add tubing field to device schema
-- [ ] Battery door visual classifier (4 classes, distinct shapes)
-- [ ] Address CLIP domain gap (data augmentation or fine-tuning)
+### Current Scanner Architecture (as of 2026-04-25)
+On-device pipeline: Camera → FramePreprocessor (auto-cycling RAW/ENHANCE/HI-CON/OCR) → ML Kit OCR + ColourClassifier → BrandMatcher → DeviceIndex elimination tree → 7-field HUD with slot reel animations → catalog cascade auto-fill.
+
+Neural net (EfficientNet-B0 TFLite) fires on auto-capture stills. Dual-signal fusion (OCR + neural net). Colour detection is OCR-gated. 3D Object Capture via ARKit (guided flow built, untested).
+
+### Scanner Status & Next Steps
+See detailed plan in memory: `plan_scanner_forward.md`
 
 ## What's Been Built
 
@@ -139,11 +141,62 @@ Requires: `google-cloud-vision`, `open_clip`, `torch`, `chromadb`. Uses ADC cred
 - Large grants (up to $50k) opening 2027
 - Total project value with in-kind: $27,240
 
-## Way Forward (as of 2026-03-23)
-1. **Scanner pipeline tested** — OCR works, CLIP has domain gap, fuzzy matching added
-2. **Seray's feedback incorporated** — 7-field audiologist model, multi-photo flow confirmed
-3. **Next: multi-photo capture flow** — overview → text → battery door → confirmation
-4. **Next: add tubing field** to device schema and scan result model
-5. **Next: battery door classifier** — 4-class visual problem (sizes 10/13/312/675)
-6. **Grant outcome June 2026** shapes resourcing; working app strengthens 2027 large grant bid
-7. **TestFlight** — v0.1.0 live with external testers; v0.2.0 (build 3) waiting for Beta App Review since Mar 31
+## Current Plan (as of 2026-04-25)
+
+### THE CRUX: 15-Second Detection Latency
+The scanner takes 15+ seconds to detect a hearing aid brand. This is the #1 issue — it affects demo reliability (external talks booked) and clinical usability. Root causes identified:
+
+1. **Edge detection (Sobel) was eating frame budget** — disabled, but verify no remnant code paths
+2. **Periodic captures pause camera stream every 3s** — steals OCR frames during active detection
+
+**Governing principle:** Visual polish is NOT free on a single-threaded camera pipeline. Every feature in `_processFrame` competes with OCR for frames. See `feedback_detection_throughput_sacred.md`.
+
+### Priority Order
+
+**P0. Fix Detection Speed** (do this first)
+- [ ] Profile `_processFrame` in `live_scanner_screen.dart` — measure actual ms/frame
+- [ ] Verify edge detection is fully disabled (no remnant code paths running)
+- [ ] Fix periodic captures — must NOT fire during active detection (only after brand+model locked)
+- [ ] Target: brand detection < 5 seconds on known devices
+- Key files: `live_scanner_screen.dart`, `edge_detector.dart`
+
+**P1. Better Visualizations & Feedback**
+- [ ] Meaningful feedback that communicates detection state (not decorative animation)
+- [ ] Bounding boxes are the hero moment — keep and polish (see `feedback_demo_legibility.md`)
+- [ ] Expand status text showing filter + text regions
+- Avoid: adding anything to the frame processing loop without measuring impact
+
+**P2. Shape, Tubing, Battery Door Detection**
+- [ ] Style (BTE/RIC/ITE/CIC) — CLIP probe showed 91.2% accuracy, ready to integrate
+- [ ] Tubing (slim/standard/none) — human-only for now, add field to device schema
+- [ ] Battery door classifier (4 classes: 10/13/312/675) — visual classifier needed
+
+**P3. Demo Reliability & Deployment**
+- [ ] Verify camera→ARKit handoff fix on device (committed but untested)
+- [ ] Deploy TestFlight — 19+ days of undeployed code since build 7 (v0.3.2, 2026-04-06)
+- [ ] DeviceIndex backtracking — wrong early narrowing cascades into wrong ID (see `feedback_elimination_tree_backtracking.md`)
+
+**P4. 3D Point Cloud** (deprioritized behind speed fix)
+- [ ] ObjectCaptureView guided flow needs on-device testing
+- See `technical_3d_point_cloud.md`
+
+### What NOT to Do
+- Don't add visual features to the frame processing loop without measuring ms/frame impact
+- Don't narrow DeviceIndex on < 70% neural net confidence
+- Don't remove OCR patterns without testing against all known devices (short patterns like 'opn', 'ria', 'ino' are real model names)
+- Don't use `context.push()` when navigating away from camera — use `context.go()` (camera never disposes otherwise)
+
+### Key Files for Scanner Work
+- `lib/features/scanner/presentation/live_scanner_screen.dart` — main scanner, frame processing, state machine
+- `lib/features/scanner/data/device_index.dart` — elimination tree (~380 lines)
+- `lib/features/scanner/data/brand_matcher.dart` — OCR pattern matching
+- `lib/features/scanner/data/edge_detector.dart` — Sobel edge detection (DISABLED)
+- `lib/features/scanner/presentation/widgets/slot_reel_text.dart` — slam animation
+- `lib/features/scanner/presentation/widgets/scan_hud.dart` — 7-field HUD
+- `lib/features/scanner/presentation/widgets/feature_overlay_painter.dart` — bounding box overlay
+
+### Context
+- Grant outcome June 2026 shapes resourcing; working app strengthens 2027 large grant bid
+- TestFlight v0.3.2 (build 7) was last deployed 2026-04-06. Massive feature gap since: 7-field HUD, catalog cascade, slot reels, DeviceIndex, edge detection, 3D capture — ALL undeployed
+- Rotary talk got standing ovation (2026-04-22). Bounding boxes had most audience impact. Multiple clubs requested talks
+- Video analysis workflow (screen record → ffmpeg → Claude analysis) is a proven diagnostic tool

@@ -22,6 +22,7 @@ class ObjectCapturePlugin {
     private var feedbackTask: Task<Void, Never>?
     private let messenger: FlutterBinaryMessenger
     private var viewFactoryRegistered = false
+    private var viewFactory: ObjectCaptureViewFactory?
 
     nonisolated init(messenger: FlutterBinaryMessenger) {
         self.messenger = messenger
@@ -64,8 +65,20 @@ class ObjectCapturePlugin {
         case "startSession":
             startSession(result: result)
 
+        case "startDetecting":
+            startDetecting(result: result)
+
+        case "startCapturing":
+            startCapturing(result: result)
+
         case "startCapture":
             startCapture(result: result)
+
+        case "beginNewScanPass":
+            beginNewScanPass(result: result)
+
+        case "beginNewScanPassAfterFlip":
+            beginNewScanPassAfterFlip(result: result)
 
         case "getState":
             result(session.map { stateString($0.state) } ?? "idle")
@@ -106,28 +119,53 @@ class ObjectCapturePlugin {
         )
         captureDir = dir
 
+        // Clean up any previous session
+        cleanup()
+
         let session = ObjectCaptureSession()
         self.session = session
 
-        // Register the native ObjectCaptureView as a Flutter platform view
-        if !viewFactoryRegistered, let registrar = ObjectCapturePluginRegistrar.flutterRegistrar {
+        // Register or update the platform view factory
+        if let factory = viewFactory {
+            // Update existing factory with the new session
+            factory.session = session
+        } else if let registrar = ObjectCapturePluginRegistrar.flutterRegistrar {
             let factory = ObjectCaptureViewFactory(session: session)
             registrar.register(factory, withId: "object-capture-view")
+            self.viewFactory = factory
             viewFactoryRegistered = true
         }
 
-        // Return immediately so Flutter can proceed — session starts async
+        // Checkpoint directory must be OUTSIDE the images directory —
+        // Apple requires imagesDirectory to be completely empty on start.
+        let checkpointDir = documentsDir.appendingPathComponent(
+            "object_capture_checkpoints_\(Int(Date().timeIntervalSince1970))"
+        )
+        try? FileManager.default.createDirectory(
+            at: checkpointDir, withIntermediateDirectories: true
+        )
+
+        // Start the session with over-capture for higher quality
+        var config = ObjectCaptureSession.Configuration()
+        config.checkpointDirectory = checkpointDir
+        config.isOverCaptureEnabled = true
+
+        print("[ObjectCapture] Starting session, imagesDir=\(dir.path)")
+        print("[ObjectCapture] isSupported=\(ObjectCaptureSession.isSupported)")
+        session.start(imagesDirectory: dir, configuration: config)
+        print("[ObjectCapture] session.start() called, current state=\(stateString(session.state))")
+
+        // Return to Flutter immediately — the session is started.
+        // State changes will arrive via the async observer below.
         result(nil)
 
-        // Start the session
-        var config = ObjectCaptureSession.Configuration()
-        config.isOverCaptureEnabled = false
-        session.start(imagesDirectory: dir, configuration: config)
-
-        // Observe state via async sequence (after start so initial state fires)
+        // Observe state changes
         stateTask = Task { [weak self] in
+            print("[ObjectCapture] Starting stateUpdates observer...")
             for await state in session.stateUpdates {
                 guard let self = self else { return }
+                print("[ObjectCapture] State changed: \(self.stateString(state))")
+
                 self.channel?.invokeMethod("onStateChanged", arguments: [
                     "state": self.stateString(state),
                 ])
@@ -137,6 +175,7 @@ class ObjectCapturePlugin {
                     ])
                 }
             }
+            print("[ObjectCapture] stateUpdates sequence ended")
         }
 
         // Observe shot count
@@ -152,14 +191,41 @@ class ObjectCapturePlugin {
         feedbackTask = Task { [weak self] in
             for await feedbackSet in session.feedbackUpdates {
                 guard let self = self else { return }
-                let text = feedbackSet.map { self.feedbackString($0) }.joined(separator: ". ")
+                let feedbackStrings = feedbackSet.map { self.feedbackString($0) }
+                let text = feedbackStrings.joined(separator: ". ")
+                let isFlippable = !feedbackSet.contains(.objectNotFlippable)
+                let userCompletedPass = feedbackSet.contains(.overCapturing)
                 self.channel?.invokeMethod("onGuidance", arguments: [
                     "guidance": text.isEmpty ? "Slowly orbit the object" : text,
+                    "isFlippable": isFlippable,
+                    "scanPassComplete": userCompletedPass,
                 ])
             }
         }
     }
 
+    /// Transition to detecting state — shows bounding box for user to frame object.
+    private func startDetecting(result: @escaping FlutterResult) {
+        guard let session = session else {
+            result(FlutterError(code: "NO_SESSION", message: "No active session", details: nil))
+            return
+        }
+        session.startDetecting()
+        result(nil)
+    }
+
+    /// Transition to capturing state — begins guided orbit capture.
+    /// Call after the user has framed the object in the bounding box.
+    private func startCapturing(result: @escaping FlutterResult) {
+        guard let session = session else {
+            result(FlutterError(code: "NO_SESSION", message: "No active session", details: nil))
+            return
+        }
+        session.startCapturing()
+        result(nil)
+    }
+
+    /// Request a single manual image capture (legacy — for non-guided flow).
     private func startCapture(result: @escaping FlutterResult) {
         guard let session = session else {
             result(FlutterError(code: "NO_SESSION", message: "No active session", details: nil))
@@ -176,6 +242,26 @@ class ObjectCapturePlugin {
                 details: nil
             ))
         }
+    }
+
+    /// Begin a new scan pass at a different height/angle (same orientation).
+    private func beginNewScanPass(result: @escaping FlutterResult) {
+        guard let session = session else {
+            result(FlutterError(code: "NO_SESSION", message: "No active session", details: nil))
+            return
+        }
+        session.beginNewScanPass()
+        result(nil)
+    }
+
+    /// Begin a new scan pass after flipping the object over.
+    private func beginNewScanPassAfterFlip(result: @escaping FlutterResult) {
+        guard let session = session else {
+            result(FlutterError(code: "NO_SESSION", message: "No active session", details: nil))
+            return
+        }
+        session.beginNewScanPassAfterFlip()
+        result(nil)
     }
 
     private func finishSession(result: @escaping FlutterResult) {
@@ -219,7 +305,7 @@ class ObjectCapturePlugin {
         case .objectTooClose: return "Move further away"
         case .objectTooFar: return "Move closer"
         case .movingTooFast: return "Slow down"
-        case .objectNotFlippable: return "Flip the object"
+        case .objectNotFlippable: return "Object cannot be flipped"
         case .environmentLowLight: return "Need more light"
         case .environmentTooDark: return "Too dark"
         case .outOfFieldOfView: return "Object out of view"

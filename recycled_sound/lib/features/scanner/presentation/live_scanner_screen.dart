@@ -21,6 +21,7 @@ import '../providers/scanner_providers.dart';
 import '../data/brand_classifier.dart';
 import '../data/brand_matcher.dart';
 import '../data/device_catalog.dart';
+import '../data/device_index.dart';
 import '../data/colour_classifier.dart';
 import '../data/frame_preprocessor.dart';
 import '../data/insight_engine.dart';
@@ -68,24 +69,26 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   // ── On-device brand classifier (EfficientNet-B0, TFLite) ────────────
   final _brandClassifier = BrandClassifier();
 
-  // ── Detection state ───────────────────────────────────────────────────
-  String? _detectedBrand;
-  String? _detectedModel;
+  // ── Detection state (backed by DeviceIndex) ────────────────────────
+  final _deviceIndex = DeviceIndex.instance;
   String? _brandConfidence;
   List<TextDetection> _liveDetections = [];
   Size _imageSize = Size.zero;
+  final Float32List _edgePoints = Float32List(0);
+
+  /// Convenience accessors — read from the elimination tree.
+  String? get _detectedBrand => _deviceIndex.state.valueOf(DeviceField.brand);
+  String? get _detectedModel => _deviceIndex.state.valueOf(DeviceField.model);
+  String? get _detectedStyle => _deviceIndex.state.valueOf(DeviceField.type);
+  String? get _detectedTubing => _deviceIndex.state.valueOf(DeviceField.tubing);
+  String? get _detectedPower => _deviceIndex.state.valueOf(DeviceField.power);
+  String? get _detectedBatterySize =>
+      _deviceIndex.state.valueOf(DeviceField.batterySize);
 
   // ── Sticky matched detections (prevents flickering) ─────────────────
   /// Matched detections persist for 500ms even if OCR drops them
   /// on subsequent frames. This prevents the green box from flickering.
   final Map<String, _StickyDetection> _stickyMatches = {};
-
-  // ── Catalog cascade fields (filled from DeviceCatalog on brand+model) ─
-  String? _detectedStyle;
-  String? _detectedTubing;
-  String? _detectedPower;
-  String? _detectedBatterySize;
-  bool _catalogLookedUp = false;
 
   // ── Phase & animation ─────────────────────────────────────────────────
   _ScanPhase _phase = _ScanPhase.booting;
@@ -116,6 +119,9 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   final List<CapturedFeature> _captures = [];
   final List<SnapEvent> _snapEvents = [];
   final List<CascadeEvent> _cascadeEvents = [];
+  /// Fields that have already been snapshot-captured. Prevents spam
+  /// when OCR keeps flipping between model candidates.
+  final Set<String> _snapshotTaken = {};
   final List<CaptureAnimation> _captureAnimations = [];
   final List<DockThumbnail> _dockedThumbnails = [];
   bool _isCapturing = false;
@@ -128,6 +134,10 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
   // ── Proactive insights ───────────────────────────────────────────────
   List<Insight> _insights = [];
+
+  // ── Live scan status (shown to user while waiting) ─────────────────
+  String _scanStatus = '';
+  Timer? _periodicCaptureTimer;
 
   // ── Graduated hint suppression ──────────────────────────────────────
   int _totalScans = 0;
@@ -163,9 +173,14 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       _log('brand classifier failed to load: $e');
     });
 
-    // Pre-load device catalog for cascade fill
-    DeviceCatalog.instance.loadFromAsset().catchError((e) {
-      _log('device catalog failed to load: $e');
+    // Pre-load device catalog, then build the elimination index
+    DeviceCatalog.instance.loadFromAsset().then((_) {
+      return _deviceIndex.load(DeviceCatalog.instance);
+    }).then((_) {
+      _deviceIndex.reset();
+      _log('DeviceIndex ready: ${_deviceIndex.candidateCount} candidates');
+    }).catchError((e) {
+      _log('device catalog/index failed to load: $e');
     });
 
     // Load scan count for hint graduation
@@ -196,6 +211,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     WidgetsBinding.instance.removeObserver(this);
     _hintTimer?.cancel();
     _crossRefTimer?.cancel();
+    _periodicCaptureTimer?.cancel();
     _pulseController.dispose();
     _stopCamera();
     _textRecognizer.close();
@@ -232,6 +248,64 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   void _tryTransitionToScanning() {
     if (_bootComplete && _cameraReady && _phase == _ScanPhase.booting) {
       setState(() => _phase = _ScanPhase.scanning);
+      _startPeriodicCaptures();
+    }
+  }
+
+  /// Take periodic snapshots while scanning so the user sees activity
+  /// in the thumbnail dock. Stops once brand is detected.
+  void _startPeriodicCaptures() {
+    _periodicCaptureTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) {
+        if (_disposed || !mounted) {
+          _periodicCaptureTimer?.cancel();
+          return;
+        }
+        // Stop once brand is found — detection snapshots take over
+        if (_detectedBrand != null) {
+          _periodicCaptureTimer?.cancel();
+          return;
+        }
+        _takePeriodicSnapshot();
+      },
+    );
+  }
+
+  /// Grab a quick snapshot for the thumbnail dock without pausing the stream.
+  Future<void> _takePeriodicSnapshot() async {
+    if (_isCapturing || _cameraController == null) return;
+    if (!_cameraController!.value.isInitialized) return;
+    _isCapturing = true;
+
+    try {
+      await _cameraController!.stopImageStream();
+      final xFile = await _cameraController!.takePicture();
+
+      if (!mounted || _disposed) return;
+
+      setState(() {
+        _dockedThumbnails.add(DockThumbnail(
+          id: 'scan_${DateTime.now().millisecondsSinceEpoch}',
+          imagePath: xFile.path,
+          label: _ocrHasSeenText ? 'Text found' : 'Scanning',
+        ));
+      });
+
+      // Resume stream
+      if (mounted && _cameraController != null) {
+        await _cameraController!.startImageStream(_onCameraFrame);
+      }
+    } catch (e) {
+      _log('periodic snapshot error: $e');
+      // Try to resume stream
+      if (mounted && _cameraController != null) {
+        try {
+          await _cameraController!.startImageStream(_onCameraFrame);
+        } catch (_) {}
+      }
+    } finally {
+      _isCapturing = false;
     }
   }
 
@@ -295,8 +369,8 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     }
   }
 
-  void _stopCamera() {
-    _cameraController?.dispose();
+  Future<void> _stopCamera() async {
+    await _cameraController?.dispose();
     _cameraController = null;
     _cameraReady = false;
   }
@@ -339,6 +413,21 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         _colourStabiliser.push(match.name, match.reference);
       }
 
+      // Edge detection disabled — was interfering with OCR frame budget.
+      // TODO: move to background isolate before re-enabling.
+      // if (Platform.isIOS && image.planes.isNotEmpty && _frameCount % 3 == 0) {
+      //   try {
+      //     _edgePoints = EdgeDetector.detectForCanvas(
+      //       bytes: image.planes[0].bytes,
+      //       width: image.width,
+      //       height: image.height,
+      //       canvasSize: Size(image.width.toDouble(), image.height.toDouble()),
+      //     );
+      //   } catch (e) {
+      //     if (_frameCount < 10) _log('edge detection error: $e');
+      //   }
+      // }
+
       // Auto-cycle filter each frame: RAW → ENHANCE → HI-CON → OCR → …
       // Once we have both brand+model, stop cycling (lock on current).
       if (_detectedBrand == null || _detectedModel == null) {
@@ -360,11 +449,17 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       final recognizedText = await _textRecognizer.processImage(inputImage);
       if (_disposed || !mounted) return;
 
-      // Debug: log what ML Kit sees
+      // Update live scan status for user feedback
       if (recognizedText.blocks.isEmpty) {
+        _scanStatus = 'SEARCHING · ${_activeFilter.label}';
         if (_frameCount % 50 == 0) {
           _log('ML Kit returned 0 blocks (frame #$_frameCount)');
         }
+      } else {
+        final lineCount = recognizedText.blocks
+            .expand((b) => b.lines)
+            .length;
+        _scanStatus = '$lineCount TEXT REGIONS · ${_activeFilter.label}';
       }
       if (recognizedText.blocks.isNotEmpty) {
         if (!_ocrHasSeenText) {
@@ -407,7 +502,8 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 label: 'MODEL: ${reverse.model}',
                 type: DetectionType.matched,
               ));
-              _detectedModel = reverse.model;
+              _deviceIndex.narrow(DeviceField.model, reverse.model,
+                  source: DetectionSource.ocr);
               _bestFilter = _activeFilter;
               HapticFeedback.mediumImpact();
               _log('MODEL detected via filter ${_activeFilter.label}');
@@ -421,9 +517,10 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               _captureSnapshot('MODEL', reverse.model, line.boundingBox);
               wasMatched = true;
 
-              if (_detectedBrand == null) {
-                // Infer brand from model
-                _detectedBrand = reverse.brand;
+              if (_detectedBrand != reverse.brand) {
+                // Set or correct brand from model match
+                _deviceIndex.narrow(DeviceField.brand, reverse.brand,
+                    source: DetectionSource.ocr, confidence: 'FROM MODEL');
                 _brandConfidence = 'FROM MODEL';
                 HapticFeedback.mediumImpact();
                 ScanTracker.recordDetection(
@@ -440,16 +537,18 @@ class _LiveScanScreenState extends State<LiveScanScreen>
             }
           }
 
-          // Try brand matching (only if model-first didn't already find it)
-          if (_detectedBrand == null && !wasMatched) {
+          // Try brand matching — can override previous detection
+          if (!wasMatched) {
             final result = BrandMatcher.matchBrandDetailed(text);
-            if (result != null) {
+            if (result != null && result.displayName != _detectedBrand) {
               detections.add(TextDetection(
                 boundingBox: line.boundingBox,
                 label: 'MAKE: ${result.displayName} [${result.confidenceLabel}]',
                 type: DetectionType.matched,
               ));
-              _detectedBrand = result.displayName;
+              _deviceIndex.narrow(DeviceField.brand, result.displayName,
+                  source: DetectionSource.ocr,
+                  confidence: result.confidenceLabel);
               _brandConfidence = result.confidenceLabel;
               _bestFilter ??= _activeFilter;
               HapticFeedback.mediumImpact();
@@ -488,7 +587,8 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 label: 'MODEL: $model',
                 type: DetectionType.matched,
               ));
-              _detectedModel = model;
+              _deviceIndex.narrow(DeviceField.model, model,
+                  source: DetectionSource.ocr);
               HapticFeedback.mediumImpact();
               ScanTracker.recordDetection(
                 field: 'MODEL',
@@ -661,6 +761,10 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   /// Camera stream pauses briefly (~200ms) then resumes.
   Future<void> _captureSnapshot(String field, String label, Rect bbox) async {
     if (_isCapturing || _cameraController == null) return;
+    // Only snapshot once per field — prevents spam when OCR flips
+    // between model candidates on successive frames.
+    if (_snapshotTaken.contains(field)) return;
+    _snapshotTaken.add(field);
     _isCapturing = true;
 
     // Record snap event for the ripple animation
@@ -776,17 +880,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
   // ── Cross-reference flash ─────────────────────────────────────────────
 
   void _showCrossReference(String brand) {
-    // TODO: use actual count from DeviceCatalog once loaded
-    final count = switch (brand.toLowerCase()) {
-      'oticon' => 23,
-      'phonak' => 45,
-      'signia' => 38,
-      'widex' => 18,
-      'resound' => 28,
-      'unitron' => 22,
-      'starkey' => 15,
-      _ => 12,
-    };
+    final count = _deviceIndex.brandDeviceCount(brand);
 
     setState(() {
       _crossRefText =
@@ -821,67 +915,34 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     _generateInsights();
   }
 
-  // ── Catalog cascade — fill 7 fields from database ────────────────────
+  // ── Catalog cascade — animate auto-locked fields from DeviceIndex ────
 
-  /// Look up the detected brand+model in the device catalog and fill
-  /// style, tubing, power source, and battery size with a staggered
-  /// cascade animation.
+  /// Animate any fields that DeviceIndex auto-locked during narrowing.
+  /// The elimination tree already filled style/tubing/power/battery —
+  /// this just provides the staggered visual cascade.
   Future<void> _catalogCascade() async {
-    if (_catalogLookedUp) return;
-    if (_detectedBrand == null) return;
-    _catalogLookedUp = true;
+    final state = _deviceIndex.state;
+    final device = _deviceIndex.matchedDevice;
 
-    final catalog = DeviceCatalog.instance;
-    DeviceEntry? device;
-    if (catalog.isLoaded) {
-      device = catalog.findByName(_detectedBrand!, _detectedModel ?? '');
-      if (device != null) {
-        _log('catalog match: ${device.name} '
-            '(type=${device.type}, battery=${device.batterySize})');
-      } else {
-        _log('catalog: no match for $_detectedBrand / $_detectedModel '
-            '— will still show data stream animation');
-      }
+    if (device != null) {
+      _log('catalog match: ${device.name} '
+          '(type=${device.type}, battery=${device.batterySize}) '
+          '— ${state.candidateCount} candidates');
+    } else {
+      _log('catalog: ${state.candidateCount} candidates for '
+          '$_detectedBrand / $_detectedModel');
     }
 
-    // Extract short style code from catalog type, e.g.
-    // "BTE (Behind-the-Ear)" → "BTE"
-    String? shortType;
-    if (device != null && device.type != 'Unknown') {
-      shortType = device.type.split(' ').first.toUpperCase();
-    }
-
-    // Cascade fields with staggered timing for visual effect.
-    // Each field pops in ~200ms after the last with a haptic tick.
-    // Works with or without a catalog match — infers what it can.
-    final fields = <(String, void Function())>[
-      if (_detectedStyle == null && shortType != null)
-        ('STYLE', () => _detectedStyle = shortType),
-      if (_detectedPower == null && device != null)
-        ('POWER', () {
-          _detectedPower = device!.batterySize.toLowerCase() == 'rechargeable'
-              ? 'Rechargeable'
-              : 'Battery';
-        }),
-      if (_detectedBatterySize == null &&
-          device != null &&
-          device.batterySize != 'Unknown')
-        ('BATTERY', () => _detectedBatterySize = device!.batterySize),
-      if (_detectedTubing == null && shortType != null)
-        ('TUBING', () {
-          if (shortType == 'BTE') {
-            _detectedTubing = 'Standard';
-          } else if ({'RIC', 'ITE', 'CIC', 'ITC', 'IIC'}
-              .contains(shortType)) {
-            _detectedTubing = 'None';
-          }
-        }),
+    // Collect fields that were auto-locked by the elimination tree
+    final cascadeFields = <(String, String)>[
+      if (_detectedStyle != null) ('STYLE', _detectedStyle!),
+      if (_detectedPower != null) ('POWER', _detectedPower!),
+      if (_detectedBatterySize != null) ('BATTERY', _detectedBatterySize!),
+      if (_detectedTubing != null) ('TUBING', _detectedTubing!),
     ];
 
-    // Always show the data stream animation — even without catalog match.
-    // If we have no fields to fill, show a "SEARCHING" pulse so the
-    // visual effect still fires.
-    if (fields.isEmpty) {
+    // Always show the data stream animation
+    if (cascadeFields.isEmpty) {
       _cascadeEvents.add(CascadeEvent(
         field: 'DATABASE',
         value: '${_detectedBrand ?? ''} ${_detectedModel ?? ''}'.trim(),
@@ -889,30 +950,15 @@ class _LiveScanScreenState extends State<LiveScanScreen>
       setState(() {});
     }
 
-    for (var i = 0; i < fields.length; i++) {
+    for (var i = 0; i < cascadeFields.length; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       if (_disposed || !mounted) return;
 
-      final (label, apply) = fields[i];
-      apply();
-      _cascadeEvents.add(CascadeEvent(field: label, value: _cascadeValue(label)));
+      final (label, value) = cascadeFields[i];
+      _cascadeEvents.add(CascadeEvent(field: label, value: value));
       setState(() {});
       HapticFeedback.selectionClick();
-      _log('cascade: $label filled');
-    }
-
-    // Auto-transition to 3D capture — only if we have brand+model,
-    // and give the scanner enough time to finish full-res OCR.
-    if (_detectedBrand != null && _detectedModel != null) {
-      await Future<void>.delayed(const Duration(seconds: 3));
-      if (_disposed || !mounted) return;
-      _stopCamera();
-      final name = [_detectedBrand, _detectedModel]
-          .where((s) => s != null && s.isNotEmpty)
-          .join(' ');
-      if (mounted) {
-        context.push('/scan/3d', extra: name.isNotEmpty ? name : null);
-      }
+      _log('cascade: $label = $value');
     }
   }
 
@@ -1077,10 +1123,11 @@ class _LiveScanScreenState extends State<LiveScanScreen>
           }
 
           if (prediction.confidence >= 0.4 && mounted) {
+            final aiConf = '${(prediction.confidence * 100).round()}% AI';
             setState(() {
-              _detectedBrand = prediction.brand;
-              _brandConfidence =
-                  '${(prediction.confidence * 100).round()}% AI';
+              _deviceIndex.narrow(DeviceField.brand, prediction.brand,
+                  source: DetectionSource.neuralNet, confidence: aiConf);
+              _brandConfidence = aiConf;
             });
             HapticFeedback.mediumImpact();
             ScanTracker.recordDetection(
@@ -1126,9 +1173,11 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               _log('OCR MODEL MATCH: ${reverse.brand} / ${reverse.model}'
                   '${overriddenModel != null ? ' (overriding: $overriddenModel)' : ''}');
               setState(() {
-                _detectedModel = reverse.model;
+                _deviceIndex.narrow(DeviceField.model, reverse.model,
+                    source: DetectionSource.ocr);
                 if (_detectedBrand != reverse.brand) {
-                  _detectedBrand = reverse.brand;
+                  _deviceIndex.narrow(DeviceField.brand, reverse.brand,
+                      source: DetectionSource.ocr, confidence: 'FROM MODEL');
                   _brandConfidence = 'FROM MODEL';
                 }
               });
@@ -1167,7 +1216,9 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               _log('OCR BRAND MATCH: ${result.displayName}'
                   '${overriddenBrand != null ? ' (overriding neural net: $overriddenBrand)' : ''}');
               setState(() {
-                _detectedBrand = result.displayName;
+                _deviceIndex.narrow(DeviceField.brand, result.displayName,
+                    source: DetectionSource.ocr,
+                    confidence: result.confidenceLabel);
                 _brandConfidence = result.confidenceLabel;
               });
               HapticFeedback.mediumImpact();
@@ -1189,7 +1240,8 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               _log('OCR MODEL MATCH '
                   '(brand-specific): $model'
                   '${_detectedModel != null ? ' (overriding: $_detectedModel)' : ''}');
-              setState(() => _detectedModel = model);
+              setState(() => _deviceIndex.narrow(DeviceField.model, model,
+                  source: DetectionSource.ocr));
               HapticFeedback.mediumImpact();
             }
           }
@@ -1226,7 +1278,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
   /// Navigate directly to results with the on-device detection data.
   /// Skips the old cloud analysis flow — everything is already identified.
-  void _captureAndReview() {
+  Future<void> _captureAndReview() async {
     if (!mounted) return;
 
     // Build a ScanResult from everything the scanner detected
@@ -1270,7 +1322,11 @@ class _LiveScanScreenState extends State<LiveScanScreen>
         .read(scanResultProvider.notifier)
         .setResult(result);
 
-    context.push('/scan/results', extra: scanId);
+    // Await camera disposal — ARKit can't grab the camera until
+    // AVCaptureSession is fully torn down.
+    await _stopCamera();
+    if (!mounted) return;
+    context.go('/scan/results', extra: scanId);
   }
 
   Future<void> _takePhoto() async {
@@ -1302,100 +1358,68 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     }
   }
 
-  /// Get the current value for a cascade field label.
-  String _cascadeValue(String label) => switch (label) {
-        'STYLE' => _detectedStyle ?? '',
-        'TUBING' => _detectedTubing ?? '',
-        'POWER' => _detectedPower ?? '',
-        'BATTERY' => _detectedBatterySize ?? '',
-        _ => '',
-      };
-
   // ── 7-field HUD helpers ────────────────────────────────────────────────
 
   /// How many of the 7 audiologist fields are filled.
-  int get _filledFieldCount {
-    var count = 0;
-    if (_detectedBrand != null) count++;
-    if (_detectedModel != null) count++;
-    if (_detectedStyle != null) count++;
-    if (_detectedTubing != null) count++;
-    if (_detectedPower != null) count++;
-    if (_detectedBatterySize != null) count++;
-    if (_detectedColour != null) count++;
-    return count;
-  }
-
-  // ── Slot reel candidates for each field ─────────────────────────────
-  static const _brandCandidates = [
-    'Oticon', 'Phonak', 'Signia', 'Widex', 'ReSound', 'Starkey',
-    'Unitron', 'Bernafon', 'Beltone', 'Jabra', 'Philips',
-  ];
-  static const _modelCandidates = [
-    'Real', 'More', 'Intent', 'Audéo', 'Lumity', 'Paradise',
-    'Pure', 'Styletto', 'Moment', 'Nexia', 'Omnia', 'Genesis',
-    'Moxi', 'Vivante', 'Evolv', 'Silk', 'Alpha',
-  ];
-  static const _styleCandidates = [
-    'BTE', 'RIC', 'ITE', 'CIC', 'ITC', 'IIC',
-  ];
-  static const _tubingCandidates = ['Standard', 'Slim', 'None'];
-  static const _powerCandidates = ['Battery', 'Rechargeable'];
-  static const _batteryCandidates = [
-    'Size 10', 'Size 13', 'Size 312', 'Size 675', 'Rechargeable',
-  ];
-  static const _colourCandidates = [
-    'Beige', 'Tan', 'Silver', 'Black', 'Brown',
-    'Espresso', 'Champagne', 'Chestnut', 'Rose Gold', 'Graphite',
-  ];
+  int get _filledFieldCount => _deviceIndex.state.filledCount +
+      (_detectedColour != null ? 1 : 0);
 
   /// Build the 7 HudField entries for the ScanHud widget.
-  List<HudField> _buildHudFields() => [
-        HudField(
-          label: 'MAKE',
-          value: _detectedBrand,
-          confidence: _brandConfidence,
-          slotCandidates: _brandCandidates,
-        ),
-        HudField(
-          label: 'MODEL',
-          value: _detectedModel,
-          slotCandidates: _modelCandidates,
-        ),
-        HudField(
-          label: 'STYLE',
-          value: _detectedStyle,
-          confidence: _detectedStyle != null ? 'CATALOG' : null,
-          slotCandidates: _styleCandidates,
-        ),
-        HudField(
-          label: 'TUBING',
-          value: _detectedTubing,
-          confidence: _detectedTubing != null ? 'INFERRED' : null,
-          slotCandidates: _tubingCandidates,
-        ),
-        HudField(
-          label: 'POWER',
-          value: _detectedPower,
-          confidence: _detectedPower != null ? 'CATALOG' : null,
-          slotCandidates: _powerCandidates,
-        ),
-        HudField(
-          label: 'BAT SIZE',
-          value: _detectedBatterySize,
-          confidence: _detectedBatterySize != null ? 'CATALOG' : null,
-          slotCandidates: _batteryCandidates,
-        ),
-        HudField(
-          label: 'COLOUR',
-          value: _detectedColour,
-          colourRgb: _detectedColourRgb,
-          colourConfidence: _colourConfidence,
-          colourConfirmed: _colourConfirmed,
-          onTap: _colourConfirmed ? _showColourPicker : null,
-          slotCandidates: _colourCandidates,
-        ),
-      ];
+  ///
+  /// Slot candidates are now dynamic — sourced from [DeviceIndex.possibleValues]
+  /// which narrows as detection progresses. The slot reels visually shrink
+  /// as the elimination tree converges.
+  List<HudField> _buildHudFields() {
+    String? confidence(DeviceField f) =>
+        _deviceIndex.state.fieldOf(f)?.confidence;
+
+    return [
+      HudField(
+        label: 'MAKE',
+        value: _detectedBrand,
+        confidence: _brandConfidence,
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.brand),
+      ),
+      HudField(
+        label: 'MODEL',
+        value: _detectedModel,
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.model),
+      ),
+      HudField(
+        label: 'STYLE',
+        value: _detectedStyle,
+        confidence: confidence(DeviceField.type),
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.type),
+      ),
+      HudField(
+        label: 'TUBING',
+        value: _detectedTubing,
+        confidence: confidence(DeviceField.tubing),
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.tubing),
+      ),
+      HudField(
+        label: 'POWER',
+        value: _detectedPower,
+        confidence: confidence(DeviceField.power),
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.power),
+      ),
+      HudField(
+        label: 'BAT SIZE',
+        value: _detectedBatterySize,
+        confidence: confidence(DeviceField.batterySize),
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.batterySize),
+      ),
+      HudField(
+        label: 'COLOUR',
+        value: _detectedColour,
+        colourRgb: _detectedColourRgb,
+        colourConfidence: _colourConfidence,
+        colourConfirmed: _colourConfirmed,
+        onTap: _colourConfirmed ? _showColourPicker : null,
+        slotCandidates: _deviceIndex.possibleValues(DeviceField.colour),
+      ),
+    ];
+  }
 
   // ── Build ─────────────────────────────────────────────────────────────
 
@@ -1488,6 +1512,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                       animationValue: _pulseController.value,
                       snapEvents: _snapEvents,
                       cascadeEvents: _cascadeEvents,
+                      edgePoints: _edgePoints,
                     ),
                   ),
                 ),
@@ -1531,6 +1556,23 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Live scan status — shows what the scanner is doing
+                    if (_phase == _ScanPhase.scanning &&
+                        _detectedBrand == null &&
+                        _scanStatus.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          _scanStatus,
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 9,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.white.withValues(alpha: 0.4),
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ),
                     // Proactive insights — appears above HUD when detected
                     if (_insights.isNotEmpty)
                       InsightStrip(insights: _insights),
@@ -1702,7 +1744,7 @@ class _LiveScanScreenState extends State<LiveScanScreen>
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      '$_detectedBrand $_detectedModel',
+                      '${_detectedBrand ?? ''}${_detectedModel != null ? ' $_detectedModel' : ''}',
                       style: const TextStyle(
                         fontFamily: 'monospace',
                         fontSize: 18,

@@ -202,10 +202,22 @@ class ScanHud extends StatelessWidget {
   }
 }
 
+/// Per-field accent colors — each field gets a distinct slam color.
+const _fieldAccentColors = [
+  Color(0xFF10B981), // MAKE — emerald green
+  Color(0xFF22D3EE), // MODEL — cyan
+  Color(0xFFA78BFA), // STYLE — violet
+  Color(0xFFF59E0B), // TUBING — amber
+  Color(0xFFEC4899), // POWER — pink
+  Color(0xFF3B82F6), // BAT SIZE — blue
+  Color(0xFFF97316), // COLOUR — orange
+];
+
 /// A single field row in the 7-field HUD.
 ///
-/// Detected fields show a green check + value. Undetected fields show
-/// a dim circle + placeholder dots. Colour field has a swatch + confidence ring.
+/// Detected fields show a colored check + value with slam animation.
+/// Undetected fields show a dim circle + placeholder dots.
+/// Colour field has a swatch + confidence ring.
 class _FieldRow extends StatelessWidget {
   const _FieldRow({required this.field, required this.index});
 
@@ -244,7 +256,8 @@ class _FieldRow extends StatelessWidget {
                     : Icons.radio_button_unchecked,
                 size: 16,
                 color: detected
-                    ? AppColors.success
+                    ? _fieldAccentColors[
+                        index.clamp(0, _fieldAccentColors.length - 1)]
                     : AppColors.white.withValues(alpha: 0.3),
               ),
             const SizedBox(width: 8),
@@ -289,6 +302,8 @@ class _FieldRow extends StatelessWidget {
                   ? SlotReelText(
                       candidates: field.slotCandidates,
                       targetValue: field.value,
+                      accentColor: _fieldAccentColors[
+                          index.clamp(0, _fieldAccentColors.length - 1)],
                     )
                   : Text(
                       detected ? field.value! : '· · ·',
@@ -298,7 +313,9 @@ class _FieldRow extends StatelessWidget {
                         fontWeight:
                             detected ? FontWeight.w600 : FontWeight.w400,
                         color: detected
-                            ? AppColors.success
+                            ? _fieldAccentColors[
+                                index.clamp(0, _fieldAccentColors.length - 1)]
+                                .withValues(alpha: 0.6)
                             : const Color(0x33FFFFFF),
                         letterSpacing: 0.3,
                       ),

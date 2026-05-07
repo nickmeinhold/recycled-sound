@@ -29,6 +29,9 @@ class DeviceCatalog {
   int get deviceCount => _devices.length;
   int get embeddingCount => _embeddingIndex.length;
 
+  /// All devices in the catalog. Used by DeviceIndex to build inverted indexes.
+  Iterable<DeviceEntry> get allDevices => _devices.values;
+
   /// Load the device catalog from the bundled JSON asset.
   Future<void> loadFromAsset({
     String assetPath = 'assets/device_catalog.json',

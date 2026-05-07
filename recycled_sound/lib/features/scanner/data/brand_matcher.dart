@@ -37,7 +37,8 @@ class BrandMatcher {
   /// Known hearing aid manufacturers, lowercase → display name.
   ///
   /// Includes aliases for common OCR misreads and legacy brand names.
-  static const _brands = <String, String>{
+  /// Public so DeviceIndex can merge these aliases into the catalog index.
+  static const brands = <String, String>{
     // Primary brands (from our device catalog)
     'oticon': 'Oticon',
     'phonak': 'Phonak',
@@ -84,14 +85,14 @@ class BrandMatcher {
     if (normalized.length < _minLength) return null;
 
     // Exact match (handles multi-word brands too)
-    final exact = _brands[normalized];
+    final exact = brands[normalized];
     if (exact != null) {
       return BrandMatchResult(
           displayName: exact, distance: 0, matchType: 'EXACT');
     }
 
     // Check if the text contains a brand name as a substring
-    for (final entry in _brands.entries) {
+    for (final entry in brands.entries) {
       if (normalized.contains(entry.key)) {
         return BrandMatchResult(
             displayName: entry.value, distance: 0, matchType: 'CONTAINS');
@@ -103,7 +104,7 @@ class BrandMatcher {
     }
 
     // Fuzzy match against single-word brands only
-    for (final entry in _brands.entries) {
+    for (final entry in brands.entries) {
       if (entry.key.contains(' ')) continue;
       if ((normalized.length - entry.key.length).abs() > _maxDistance) continue;
       final dist = _levenshtein(normalized, entry.key);
@@ -130,21 +131,52 @@ class BrandMatcher {
     if (normalized.length < 4 || normalized.length > 30) return null;
     final lower = normalized.toLowerCase();
 
-    for (final entry in _modelPatterns.entries) {
+    for (final entry in modelPatterns.entries) {
       final brandKey = entry.key;
       for (final pattern in entry.value) {
-        // Exact substring: 4+ chars is reliable (catches "moxi" in "moxi2 kiss")
-        if (pattern.length >= 4 && lower.contains(pattern)) {
-          final brandName = _brands[brandKey];
-          if (brandName == null) continue;
-          return (brand: brandName, model: normalized);
+        String? brandName;
+
+        // Exact match: any length — "Ino" exactly matches "ino"
+        if (lower == pattern) {
+          brandName = brands[brandKey];
+        }
+        // Substring: 4+ chars is reliable (catches "moxi" in "moxi2 kiss")
+        else if (pattern.length >= 4 && lower.contains(pattern)) {
+          brandName = brands[brandKey];
         }
         // Fuzzy: 5+ chars only to avoid false positives on short words
-        if (pattern.length >= 5 && _levenshtein(lower, pattern) <= 1) {
-          final brandName = _brands[brandKey];
-          if (brandName == null) continue;
-          return (brand: brandName, model: normalized);
+        else if (pattern.length >= 5 && _levenshtein(lower, pattern) <= 1) {
+          brandName = brands[brandKey];
         }
+
+        if (brandName == null) continue;
+
+        // Clean the model name: extract just the model portion.
+        // OCR often reads brand+model as one garbled word:
+        //   "otconActo" → should be "Acto" (brand "oticon" is garbled)
+        //   "phonakaudeo" → should be "audeo"
+        //
+        // Strategy: find where the pattern starts and extract from there.
+        var model = normalized;
+        final patIdx = lower.indexOf(pattern);
+        if (patIdx > 0) {
+          // Pattern is embedded — extract from pattern start onward
+          // e.g. "otconActo" with pattern "acto" → "Acto"
+          model = normalized.substring(patIdx);
+        } else if (patIdx == 0 && normalized.length > pattern.length) {
+          // Pattern is at the start — take the whole thing
+          model = normalized;
+        }
+        // If model is still the full garbled text and contains brand,
+        // use just the capitalized pattern as a clean display name
+        if (model.length > pattern.length + 3 && model.toLowerCase().contains(brandKey)) {
+          model = pattern[0].toUpperCase() + pattern.substring(1);
+        }
+        if (model.isEmpty) {
+          model = pattern[0].toUpperCase() + pattern.substring(1);
+        }
+
+        return (brand: brandName, model: model);
       }
     }
 
@@ -152,6 +184,9 @@ class BrandMatcher {
   }
 
   /// Try to extract a model identifier from [text] given a known [brand].
+  ///
+  /// If the text contains the brand name as a prefix (e.g. "Oticon Ino"),
+  /// it's stripped so the model value is clean (e.g. "Ino" not "Oticon Ino").
   static String? matchModel(String text, String brand) {
     final normalized = text.trim();
     if (normalized.length < 3 || normalized.length > 30) return null;
@@ -159,16 +194,25 @@ class BrandMatcher {
     // Don't match the brand itself as a model
     if (normalized.toLowerCase() == brand.toLowerCase()) return null;
 
-    final patterns = _modelPatterns[brand.toLowerCase()];
+    final patterns = modelPatterns[brand.toLowerCase()];
     if (patterns == null) return null;
 
-    final lower = normalized.toLowerCase();
+    // Strip brand prefix if present (e.g. "Oticon Ino" → "Ino")
+    var candidate = normalized;
+    final lower = candidate.toLowerCase();
+    final brandLower = brand.toLowerCase();
+    if (lower.startsWith(brandLower)) {
+      candidate = candidate.substring(brand.length).trim();
+      if (candidate.isEmpty) return null; // was just the brand name
+    }
+
+    final candidateLower = candidate.toLowerCase();
     for (final pattern in patterns) {
       // Substring match: any length pattern works if text is long enough
-      if (lower.contains(pattern)) return normalized;
+      if (candidateLower.contains(pattern)) return candidate;
       // Fuzzy: only for 4+ char patterns to avoid false positives
-      if (pattern.length >= 4 && _levenshtein(lower, pattern) <= 1) {
-        return normalized;
+      if (pattern.length >= 4 && _levenshtein(candidateLower, pattern) <= 1) {
+        return candidate;
       }
     }
 
@@ -180,14 +224,15 @@ class BrandMatcher {
   /// Verified against manufacturer product lines 2026-04-22.
   /// Each entry is a real product name that might appear printed on
   /// a hearing aid or its packaging.
-  static const _modelPatterns = <String, List<String>>{
+  /// Public so DeviceIndex can merge these into the catalog index.
+  static const modelPatterns = <String, List<String>>{
     'oticon': [
       // Current
       'real', 'more', 'intent', 'zircon', 'zeal', 'xceed', 'play', 'own',
       // Recent
       'opn s', 'opn', 'siya', 'ruby', 'ria',
       // Legacy (still in circulation)
-      'nera', 'alta', 'agil', 'acto', 'dynamo', 'sensei', 'safari',
+      'nera', 'alta', 'agil', 'acto', 'ino', 'dynamo', 'sensei', 'safari',
       'chili', 'sumo',
     ],
     'phonak': [

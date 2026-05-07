@@ -14,7 +14,8 @@ class ObjectCaptureChannel {
   /// Callbacks from native side.
   void Function(String state)? onStateChanged;
   void Function(int shotsTaken, bool isComplete)? onProgress;
-  void Function(String guidance)? onGuidance;
+  void Function(String guidance, {bool isFlippable, bool scanPassComplete})?
+      onGuidance;
   void Function(double progress)? onReconstructionProgress;
   void Function(String modelPath)? onModelReady;
 
@@ -36,7 +37,11 @@ class ObjectCaptureChannel {
             args?['isComplete'] as bool? ?? false,
           );
         case 'onGuidance':
-          onGuidance?.call(args?['guidance'] as String? ?? '');
+          onGuidance?.call(
+            args?['guidance'] as String? ?? '',
+            isFlippable: args?['isFlippable'] as bool? ?? true,
+            scanPassComplete: args?['scanPassComplete'] as bool? ?? false,
+          );
         case 'onReconstructionProgress':
           onReconstructionProgress
               ?.call((args?['progress'] as num?)?.toDouble() ?? 0.0);
@@ -83,7 +88,27 @@ class ObjectCaptureChannel {
     await _channel.invokeMethod<void>('startSession');
   }
 
-  /// Request an image capture (one shot of the object).
+  /// Transition to detecting state — shows bounding box for framing.
+  Future<void> startDetecting() async {
+    await _channel.invokeMethod<void>('startDetecting');
+  }
+
+  /// Transition to guided capture — begins orbit capture after framing.
+  Future<void> startCapturing() async {
+    await _channel.invokeMethod<void>('startCapturing');
+  }
+
+  /// Begin a new scan pass at a different height/angle.
+  Future<void> beginNewScanPass() async {
+    await _channel.invokeMethod<void>('beginNewScanPass');
+  }
+
+  /// Begin a new scan pass after flipping the object.
+  Future<void> beginNewScanPassAfterFlip() async {
+    await _channel.invokeMethod<void>('beginNewScanPassAfterFlip');
+  }
+
+  /// Request a single manual image capture (legacy).
   Future<void> captureImage() async {
     await _channel.invokeMethod<void>('startCapture');
   }

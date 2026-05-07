@@ -13,6 +13,7 @@ Exports:
 Usage:
   python3 train_brand_classifier.py              # train + export
   python3 train_brand_classifier.py --epochs 30  # more epochs
+  python3 train_brand_classifier.py --curriculum # curriculum learning (3 stages)
   python3 train_brand_classifier.py --test-only  # evaluate existing model
 
 Requires: tensorflow, Pillow
@@ -121,6 +122,77 @@ def organise_images():
     return valid_brands
 
 
+def _build_augmentation():
+    """Build the aggressive augmentation pipeline for domain-gap bridging."""
+    return tf.keras.Sequential([
+        tf.keras.layers.RandomFlip("horizontal"),
+        tf.keras.layers.RandomRotation(0.15),        # ±54°
+        tf.keras.layers.RandomZoom((-0.2, 0.2)),     # 80-120% zoom
+        tf.keras.layers.RandomBrightness(0.2),       # ±20% brightness
+        tf.keras.layers.RandomContrast(0.2),         # ±20% contrast
+        tf.keras.layers.RandomTranslation(0.1, 0.1), # ±10% shift
+    ], name="augmentation")
+
+
+def _filter_box_photos(directory):
+    """Return list of file paths that do NOT contain '_box' in their filename."""
+    filtered = []
+    for brand_dir in sorted(Path(directory).iterdir()):
+        if not brand_dir.is_dir():
+            continue
+        for img_path in sorted(brand_dir.iterdir()):
+            if "_box" not in img_path.name:
+                filtered.append(str(img_path))
+    return filtered
+
+
+def _make_dataset_from_paths(file_paths, class_names, augment=False):
+    """Build a tf.data.Dataset from explicit file paths with optional augmentation.
+
+    Args:
+        file_paths: List of absolute image paths (each inside a brand subfolder).
+        class_names: Sorted list of brand names (defines label indices).
+        augment: Whether to apply augmentation.
+
+    Returns:
+        A batched, prefetched tf.data.Dataset of (image, one_hot_label) pairs.
+    """
+    num_classes = len(class_names)
+    class_to_idx = {name: i for i, name in enumerate(class_names)}
+
+    # Build parallel lists of paths and integer labels
+    labels = []
+    valid_paths = []
+    for p in file_paths:
+        brand = Path(p).parent.name
+        if brand in class_to_idx:
+            valid_paths.append(p)
+            labels.append(class_to_idx[brand])
+
+    path_ds = tf.data.Dataset.from_tensor_slices((valid_paths, labels))
+    path_ds = path_ds.shuffle(len(valid_paths), seed=42)
+
+    def _load(path, label):
+        img = tf.io.read_file(path)
+        img = tf.image.decode_image(img, channels=3, expand_animations=False)
+        img = tf.image.resize(img, [IMG_SIZE, IMG_SIZE])
+        img = tf.ensure_shape(img, [IMG_SIZE, IMG_SIZE, 3])
+        one_hot = tf.one_hot(label, num_classes)
+        return img, one_hot
+
+    ds = path_ds.map(_load, num_parallel_calls=tf.data.AUTOTUNE)
+
+    if augment:
+        aug = _build_augmentation()
+        ds = ds.map(
+            lambda x, y: (aug(x, training=True), y),
+            num_parallel_calls=tf.data.AUTOTUNE,
+        )
+
+    ds = ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    return ds
+
+
 def create_datasets(valid_brands):
     """Create train/val datasets with augmentation."""
     print("\nLoading datasets...")
@@ -152,15 +224,7 @@ def create_datasets(valid_brands):
     print(f"Train batches: {tf.data.experimental.cardinality(train_ds).numpy()}")
     print(f"Val batches: {tf.data.experimental.cardinality(val_ds).numpy()}")
 
-    # Aggressive augmentation to bridge product-shot → real-world domain gap
-    augmentation = tf.keras.Sequential([
-        tf.keras.layers.RandomFlip("horizontal"),
-        tf.keras.layers.RandomRotation(0.15),        # ±54°
-        tf.keras.layers.RandomZoom((-0.2, 0.2)),     # 80-120% zoom
-        tf.keras.layers.RandomBrightness(0.2),       # ±20% brightness
-        tf.keras.layers.RandomContrast(0.2),         # ±20% contrast
-        tf.keras.layers.RandomTranslation(0.1, 0.1), # ±10% shift
-    ], name="augmentation")
+    augmentation = _build_augmentation()
 
     # Apply augmentation only to training
     train_ds = train_ds.map(
@@ -173,6 +237,68 @@ def create_datasets(valid_brands):
     val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
 
     return train_ds, val_ds, class_names, num_classes
+
+
+def create_curriculum_datasets(valid_brands):
+    """Create three staged datasets for curriculum learning.
+
+    Stage 1: Product shots only (no _box files), no augmentation.
+    Stage 2: Product shots only (no _box files), with augmentation.
+    Stage 3: All files (product shots + box photos), with augmentation.
+
+    Returns:
+        (stage1_ds, stage2_ds, stage3_ds, val_ds, class_names, num_classes)
+    """
+    print("\nLoading curriculum datasets...")
+
+    # Use the standard validation split for consistent evaluation across stages
+    val_ds = tf.keras.utils.image_dataset_from_directory(
+        str(ORGANISED_DIR),
+        validation_split=0.2,
+        subset="validation",
+        seed=42,
+        image_size=(IMG_SIZE, IMG_SIZE),
+        batch_size=BATCH_SIZE,
+        label_mode="categorical",
+    )
+
+    # Get class names from a throwaway full dataset load
+    temp_ds = tf.keras.utils.image_dataset_from_directory(
+        str(ORGANISED_DIR),
+        validation_split=0.2,
+        subset="training",
+        seed=42,
+        image_size=(IMG_SIZE, IMG_SIZE),
+        batch_size=BATCH_SIZE,
+        label_mode="categorical",
+    )
+    class_names = temp_ds.class_names
+    num_classes = len(class_names)
+
+    # Get the training file paths (matching the 80/20 split)
+    # We replicate the split by using the same seed-based approach
+    all_train_paths = temp_ds.file_paths
+
+    # Partition into non-box and box files
+    no_box_paths = [p for p in all_train_paths if "_box" not in Path(p).name]
+    all_paths = list(all_train_paths)
+
+    box_count = len(all_paths) - len(no_box_paths)
+    print(f"\nClasses ({num_classes}): {class_names}")
+    print(f"Training images: {len(all_paths)} total, "
+          f"{len(no_box_paths)} product shots, {box_count} box photos")
+    print(f"Val batches: {tf.data.experimental.cardinality(val_ds).numpy()}")
+
+    # Stage 1: no box, no augmentation
+    stage1_ds = _make_dataset_from_paths(no_box_paths, class_names, augment=False)
+    # Stage 2: no box, with augmentation
+    stage2_ds = _make_dataset_from_paths(no_box_paths, class_names, augment=True)
+    # Stage 3: all files, with augmentation
+    stage3_ds = _make_dataset_from_paths(all_paths, class_names, augment=True)
+
+    val_ds = val_ds.prefetch(tf.data.AUTOTUNE)
+
+    return stage1_ds, stage2_ds, stage3_ds, val_ds, class_names, num_classes
 
 
 def build_model(num_classes):
@@ -333,6 +459,8 @@ def main():
                         help="Evaluate existing model without training")
     parser.add_argument("--no-fine-tune", action="store_true",
                         help="Skip backbone fine-tuning")
+    parser.add_argument("--curriculum", action="store_true",
+                        help="Use curriculum learning: 3 stages of increasing difficulty")
     args = parser.parse_args()
 
     # Check for MPS (Apple Silicon) or GPU
@@ -352,7 +480,12 @@ def main():
         sys.exit(1)
 
     # Step 2: Create datasets
-    train_ds, val_ds, class_names, num_classes = create_datasets(valid_brands)
+    if args.curriculum:
+        stage1_ds, stage2_ds, stage3_ds, val_ds, class_names, num_classes = (
+            create_curriculum_datasets(valid_brands)
+        )
+    else:
+        train_ds, val_ds, class_names, num_classes = create_datasets(valid_brands)
 
     if args.test_only:
         tflite_path = MODEL_DIR / "brand_classifier.tflite"
@@ -362,32 +495,100 @@ def main():
         evaluate_tflite(tflite_path, val_ds, class_names)
         return
 
-    # Step 3: Train head
-    print(f"\n── Training head ({args.epochs} epochs) ──")
+    # Step 3: Build model
     model, base_model = build_model(num_classes)
-    history = model.fit(
-        train_ds,
-        validation_data=val_ds,
-        epochs=args.epochs,
-        callbacks=[
-            tf.keras.callbacks.EarlyStopping(
-                monitor="val_accuracy",
-                patience=5,
-                restore_best_weights=True,
-            ),
-        ],
-    )
 
-    head_acc = max(history.history["val_accuracy"])
-    print(f"\nBest head-only val accuracy: {head_acc:.1%}")
+    if args.curriculum:
+        # Curriculum learning: 3 stages of increasing difficulty
+        total_epochs = args.epochs
+        stage_epochs = max(1, total_epochs // 3)
+        # Give any remainder epochs to the last head stage
+        stage1_epochs = stage_epochs
+        stage2_epochs = total_epochs - stage1_epochs  # stages 1+2 share head-only
 
-    # Step 4: Fine-tune backbone
-    if not args.no_fine_tune:
-        ft_history = fine_tune_backbone(
-            model, base_model, train_ds, val_ds, epochs=args.fine_tune_epochs,
+        # ── Stage 1: Foundation ──
+        print(f"\n{'─' * 60}")
+        print(f"── Stage 1: Foundation (no augmentation, no box photos) ──")
+        print(f"── {stage1_epochs} epochs, head-only ──")
+        print(f"{'─' * 60}")
+        history1 = model.fit(
+            stage1_ds,
+            validation_data=val_ds,
+            epochs=stage1_epochs,
+            callbacks=[
+                tf.keras.callbacks.EarlyStopping(
+                    monitor="val_accuracy",
+                    patience=5,
+                    restore_best_weights=True,
+                ),
+            ],
         )
-        ft_acc = max(ft_history.history["val_accuracy"])
-        print(f"\nBest fine-tuned val accuracy: {ft_acc:.1%}")
+        s1_acc = max(history1.history["val_accuracy"])
+        print(f"\nStage 1 best val accuracy: {s1_acc:.1%}")
+
+        # ── Stage 2: Augmentation ──
+        print(f"\n{'─' * 60}")
+        print(f"── Stage 2: Augmentation (with augmentation, no box photos) ──")
+        print(f"── {stage2_epochs} epochs, head-only ──")
+        print(f"{'─' * 60}")
+        history2 = model.fit(
+            stage2_ds,
+            validation_data=val_ds,
+            initial_epoch=stage1_epochs,
+            epochs=stage1_epochs + stage2_epochs,
+            callbacks=[
+                tf.keras.callbacks.EarlyStopping(
+                    monitor="val_accuracy",
+                    patience=5,
+                    restore_best_weights=True,
+                ),
+            ],
+        )
+        s2_acc = max(history2.history["val_accuracy"])
+        print(f"\nStage 2 best val accuracy: {s2_acc:.1%}")
+
+        head_acc = max(s1_acc, s2_acc)
+        print(f"\nBest head-only val accuracy (across stages 1-2): {head_acc:.1%}")
+
+        # ── Stage 3: Fine-tuning with everything ──
+        if not args.no_fine_tune:
+            print(f"\n{'─' * 60}")
+            print(f"── Stage 3: Real-world (all photos + augmentation, fine-tuning) ──")
+            print(f"── {args.fine_tune_epochs} epochs, backbone unfrozen ──")
+            print(f"{'─' * 60}")
+            ft_history = fine_tune_backbone(
+                model, base_model, stage3_ds, val_ds,
+                epochs=args.fine_tune_epochs,
+            )
+            ft_acc = max(ft_history.history["val_accuracy"])
+            print(f"\nStage 3 best val accuracy: {ft_acc:.1%}")
+
+    else:
+        # Standard training (no curriculum)
+        print(f"\n── Training head ({args.epochs} epochs) ──")
+        history = model.fit(
+            train_ds,
+            validation_data=val_ds,
+            epochs=args.epochs,
+            callbacks=[
+                tf.keras.callbacks.EarlyStopping(
+                    monitor="val_accuracy",
+                    patience=5,
+                    restore_best_weights=True,
+                ),
+            ],
+        )
+
+        head_acc = max(history.history["val_accuracy"])
+        print(f"\nBest head-only val accuracy: {head_acc:.1%}")
+
+        # Step 4: Fine-tune backbone
+        if not args.no_fine_tune:
+            ft_history = fine_tune_backbone(
+                model, base_model, train_ds, val_ds, epochs=args.fine_tune_epochs,
+            )
+            ft_acc = max(ft_history.history["val_accuracy"])
+            print(f"\nBest fine-tuned val accuracy: {ft_acc:.1%}")
 
     # Step 5: Export
     tflite_path = export_tflite(model, class_names)
