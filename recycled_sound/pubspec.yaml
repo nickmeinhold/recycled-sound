@@ -40,6 +40,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Disable LLDB debug attach — works around the iOS 17+ shared-cache bug
+  # where LLDB can't find libobjc.A.dylib on-disk, hangs debug start, and
+  # blocks the Dart VM Service handshake (white screen + 60s timeout).
+  # Profile/release builds unaffected.
+  config:
+    enable-lldb-debugging: false
   assets:
     - assets/device_db.bin
     - assets/device_catalog.json
