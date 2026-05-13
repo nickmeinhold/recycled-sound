@@ -1334,6 +1334,13 @@ class _LiveScanScreenState extends State<LiveScanScreen>
 
       // ── Signal 1: Neural net brand classification ────────────────────
       // Runs on Neural Engine (iOS) or GPU (Android), ~10ms
+      //
+      // Gate: narrow on absolute confidence >= 0.7, OR absolute >= 0.4
+      // *and* top1/top2 margin ratio >= 2.0. The margin clause is what
+      // catches the Oticon 46.5%/Phonak 13.4% case from 2026-05-07
+      // profiling — strong winner at moderate absolute confidence is
+      // actionable signal, whereas a 41/38 split at the same absolute
+      // level is a coin flip we shouldn't act on.
       if (_brandClassifier.isLoaded && _detectedBrand == null) {
         try {
           final prediction = await _brandClassifier.classifyFile(xFile.path);
@@ -1341,12 +1348,32 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               '(${(prediction.confidence * 100).toStringAsFixed(1)}%)');
 
           // Log top 3 for debugging
-          for (final p in prediction.topN(3)) {
+          final top3 = prediction.topN(3).toList();
+          for (final p in top3) {
             _log('  ${p.brand}: ${(p.probability * 100).toStringAsFixed(1)}%');
           }
 
-          if (prediction.confidence >= 0.4 && mounted) {
-            final aiConf = '${(prediction.confidence * 100).round()}% AI';
+          // Top1/top2 margin — distinguishes "clear winner at 46%" from
+          // "coin flip at 41%". Defaults to 999 (huge) if there's no
+          // second candidate to compare against (single-class output).
+          final top2 = top3.length > 1 ? top3[1].probability : 0.0;
+          final margin = top2 > 0 ? prediction.confidence / top2 : 999.0;
+
+          final absoluteHigh = prediction.confidence >= 0.7;
+          final marginStrong = prediction.confidence >= 0.4 && margin >= 2.0;
+          final shouldNarrow = (absoluteHigh || marginStrong) && mounted;
+
+          if (shouldNarrow) {
+            // Label encodes both signals so the override-guard can rank
+            // strong-margin predictions above weak-margin ones if we
+            // later add a per-margin rank tier.
+            final aiConf = absoluteHigh
+                ? '${(prediction.confidence * 100).round()}% AI'
+                : '${(prediction.confidence * 100).round()}% AI '
+                    '×${margin.toStringAsFixed(1)}';
+            _log('neural net GATE PASS — '
+                'abs=${prediction.confidence.toStringAsFixed(2)} '
+                'margin=${margin.toStringAsFixed(2)}× → "$aiConf"');
             setState(() {
               _deviceIndex.narrow(DeviceField.brand, prediction.brand,
                   source: DetectionSource.neuralNet, confidence: aiConf);
@@ -1358,10 +1385,15 @@ class _LiveScanScreenState extends State<LiveScanScreen>
               value: prediction.brand,
               filter: _activeFilter.label,
               colour: _detectedColour,
-              confidence: '${(prediction.confidence * 100).round()}% AI',
+              confidence: aiConf,
               matchType: 'neural_net',
             );
             _showCrossReference(prediction.brand);
+          } else {
+            _log('neural net GATE REJECT — '
+                'abs=${prediction.confidence.toStringAsFixed(2)} '
+                'margin=${margin.toStringAsFixed(2)}× '
+                '(need abs>=0.7 OR (abs>=0.4 AND margin>=2.0))');
           }
         } catch (e) {
           _log('neural net error: $e');
