@@ -54,6 +54,14 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import preprocess_box_photos as pbp  # noqa: E402
 
+# Brand alias map mirrors train_brand_classifier.py so ingested photos
+# land in the same merged-brand folder the classifier trains against.
+# A None target means the brand is a white-label / unidentifiable
+# reseller — ingest refuses these rather than scattering them across
+# the corpus. (Captured as task #44 / #49: should canonicalise the
+# alias map into a shared JSON asset eventually.)
+from train_brand_classifier import BRAND_ALIASES  # noqa: E402
+
 DATA_DIR = Path(__file__).resolve().parent
 CHROMA_DIR = DATA_DIR / "chroma_db"
 IMAGES_BOX_DIR = DATA_DIR / "images_box"
@@ -289,8 +297,29 @@ def ingest(
 
     # Preserve caller's casing — existing brand folders use mixed case
     # (e.g. "ReSound", "GN Resound") that .title() would mangle.
-    brand_clean = brand.strip()
+    brand_input = brand.strip()
     model_clean = model.strip()
+
+    # Apply brand alias map to keep the corpus consistent with the
+    # classifier's view of brand identity. Sub-brands like Hansaton and
+    # Rexton merge into their parent (Signia, both under WS Audiology);
+    # Jabra merges into ReSound (both under GN). White-label resellers
+    # (Specsavers Advance, Hearing Australia, Amplifon) map to None —
+    # we refuse those because their device origin isn't identifiable
+    # from the photo alone.
+    if brand_input in BRAND_ALIASES:
+        mapped = BRAND_ALIASES[brand_input]
+        if mapped is None:
+            raise ValueError(
+                f"Brand '{brand_input}' is a white-label reseller and "
+                f"cannot be ingested (BRAND_ALIASES maps it to None in "
+                f"train_brand_classifier.py). The actual manufacturer "
+                f"would need to be determined from the device markings."
+            )
+        print(f"  brand alias: {brand_input!r} → {mapped!r}")
+        brand_clean = mapped
+    else:
+        brand_clean = brand_input
     photo_hash = _sha256(photo_path)
     short_hash = photo_hash[:8]
     base_stem = f"box_ingest_{short_hash}_{_safe_token(brand_clean)}_{_safe_token(model_clean)}"
