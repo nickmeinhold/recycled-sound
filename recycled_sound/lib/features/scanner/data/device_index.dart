@@ -36,6 +36,41 @@ class LockedField {
   final DateTime lockedAt;
 }
 
+/// One rejected-override event captured by the narrowing guard.
+///
+/// Each record is a single instance of "evidence arrived but didn't beat
+/// the existing lock." Aggregated per scan to reveal which OCR patterns,
+/// neural-net guesses, or catalog cascades are noisiest. Feeds future
+/// brand_matcher tuning + the full backtracking work (stream γ).
+class ContradictionRecord {
+  ContradictionRecord({
+    required this.field,
+    required this.keptValue,
+    required this.keptConfidence,
+    required this.keptRank,
+    required this.rejectedValue,
+    required this.rejectedConfidence,
+    required this.rejectedRank,
+    required this.rejectedSource,
+    required this.at,
+  });
+
+  final DeviceField field;
+  final String keptValue;
+  final String? keptConfidence;
+  final int keptRank;
+  final String rejectedValue;
+  final String? rejectedConfidence;
+  final int rejectedRank;
+  final DetectionSource rejectedSource;
+  final DateTime at;
+
+  @override
+  String toString() => '$field: kept "$keptValue"($keptConfidence,r=$keptRank) '
+      'over "$rejectedValue"($rejectedConfidence,r=$rejectedRank,'
+      'src=${rejectedSource.name})';
+}
+
 /// Immutable snapshot of detection state.
 class DetectionState {
   const DetectionState({
@@ -101,6 +136,27 @@ class DeviceIndex {
   /// Brand alias map: normalized alias → canonical display name.
   /// Merged from BrandMatcher.brands and catalog manufacturers.
   final _brandAliases = <String, String>{};
+
+  /// Rejected-override events from the current scan session.
+  /// Cleared on reset(). Read via [contradictions] for inspection /
+  /// summary logging. Bounded (last 200 entries) to cap memory if a
+  /// long-running scan keeps firing rejections.
+  final _contradictions = <ContradictionRecord>[];
+  static const int _kMaxContradictions = 200;
+
+  /// Read-only view of contradictions from the current scan session.
+  List<ContradictionRecord> get contradictions =>
+      List.unmodifiable(_contradictions);
+
+  /// Count of contradictions grouped by field name — handy for the
+  /// "X overrides rejected on brand, Y on model" summary at scan end.
+  Map<String, int> get contradictionsByField {
+    final result = <String, int>{};
+    for (final r in _contradictions) {
+      result.update(r.field.name, (n) => n + 1, ifAbsent: () => 1);
+    }
+    return result;
+  }
 
   // ── Live scan state ──────────────────────────────────────────────────
 
@@ -196,9 +252,12 @@ class DeviceIndex {
   }
 
   /// Reset to full candidate set. Call at the start of each new scan.
+  /// Also clears any contradictions from the previous scan so the
+  /// summary at the next scan-end reflects only this run.
   void reset() {
     _candidates = Set.from(_allDeviceIds);
     _locked.clear();
+    _contradictions.clear();
     _emitState();
   }
 
@@ -222,13 +281,23 @@ class DeviceIndex {
     // Override guard: stops the "right answer then noisy override" flapping
     // observed live on 2026-05-07. If the field is already locked, require
     // strictly stronger evidence to flip it. Manual overrides always win.
-    // Logged in debug builds so we can see in the console how often the
-    // guard fires — every rejection is a signal the noise model is real.
+    // Each rejected override is appended to _contradictions for the scan-
+    // end summary and for future backtracking (γ) — frequent rejections
+    // are the signal that the brand_matcher pattern is too aggressive.
     final existing = _locked[field];
     if (existing != null && source != DetectionSource.manual) {
       final existingRank = _confidenceRank(existing.confidence);
       final newRank = _confidenceRank(confidence);
       if (newRank <= existingRank) {
+        _recordContradiction(
+          field: field,
+          existing: existing,
+          existingRank: existingRank,
+          newValue: value,
+          newConfidence: confidence,
+          newRank: newRank,
+          newSource: source,
+        );
         if (kDebugMode) {
           debugPrint('DeviceIndex: REJECT override on ${field.name} — '
               'kept "${existing.value}" (${existing.confidence}, '
@@ -288,6 +357,36 @@ class DeviceIndex {
 
     _emitState();
     return state;
+  }
+
+  /// Append a contradiction record for the override-guard rejection
+  /// path. Bounded by _kMaxContradictions — drops oldest on overflow
+  /// (rare in practice; a 200-rejection scan would be diagnostic chaos
+  /// regardless of buffer size).
+  void _recordContradiction({
+    required DeviceField field,
+    required LockedField existing,
+    required int existingRank,
+    required String newValue,
+    required String? newConfidence,
+    required int newRank,
+    required DetectionSource newSource,
+  }) {
+    _contradictions.add(ContradictionRecord(
+      field: field,
+      keptValue: existing.value,
+      keptConfidence: existing.confidence,
+      keptRank: existingRank,
+      rejectedValue: newValue,
+      rejectedConfidence: newConfidence,
+      rejectedRank: newRank,
+      rejectedSource: newSource,
+      at: DateTime.now(),
+    ));
+    if (_contradictions.length > _kMaxContradictions) {
+      _contradictions.removeRange(
+          0, _contradictions.length - _kMaxContradictions);
+    }
   }
 
   /// Numeric confidence rank used by the override guard. Higher beats

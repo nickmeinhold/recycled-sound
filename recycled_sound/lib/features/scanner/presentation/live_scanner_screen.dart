@@ -1103,6 +1103,24 @@ class _LiveScanScreenState extends State<LiveScanScreen>
     ScanTracker.incrementLocalScanCount();
     // Freeze the elapsed timer so the final reading stays on-screen.
     _elapsedTicker?.cancel();
+
+    // Contradiction summary — how many rejected overrides fired during
+    // this scan, grouped by field. Frequent rejections are the signal
+    // that a particular pattern matcher (BrandMatcher fuzzy, neural net,
+    // catalog cascade) is too aggressive. Feeds future tuning + γ
+    // backtracking work. Debug-only — keeps release builds quiet.
+    if (kDebugMode) {
+      final byField = _deviceIndex.contradictionsByField;
+      if (byField.isEmpty) {
+        _log('contradictions: none — override guard quiet this scan');
+      } else {
+        final summary = byField.entries
+            .map((e) => '${e.key}=${e.value}')
+            .join(' ');
+        _log('contradictions: $summary '
+            '(total=${_deviceIndex.contradictions.length})');
+      }
+    }
     setState(() {
       _showCompletion = true;
       _phase = _ScanPhase.complete;
