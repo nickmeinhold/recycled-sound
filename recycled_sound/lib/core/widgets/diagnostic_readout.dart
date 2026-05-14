@@ -44,7 +44,11 @@ class _DiagnosticReadoutState extends State<DiagnosticReadout> {
     if (widget.entries.isEmpty) {
       return const SizedBox.shrink();
     }
-    final entry = widget.entries[_index];
+    // entries can shrink between rebuilds (cooldown clears, low-power
+    // toggles off) so a stale _index can overshoot. Modulo wraps safely
+    // without forcing a setState during build.
+    final safeIndex = _index % widget.entries.length;
+    final entry = widget.entries[safeIndex];
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
       transitionBuilder: (child, anim) => FadeTransition(
