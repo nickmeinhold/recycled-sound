@@ -11,6 +11,7 @@ import '../../features/devices/presentation/device_list_screen.dart';
 import '../../features/devices/presentation/device_detail_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/signup_screen.dart';
+import '../../features/boot/presentation/boot_screen.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_typography.dart';
 
@@ -20,8 +21,15 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>();
 /// App-wide router using go_router with a ShellRoute for bottom tab navigation.
 final appRouter = GoRouter(
   navigatorKey: _rootNavigatorKey,
-  initialLocation: '/',
+  initialLocation: '/boot',
   routes: [
+    // ── Boot / diagnostic splash ───────────────────────────────────────
+    GoRoute(
+      path: '/boot',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const BootScreen(),
+    ),
+
     // ── Shell route for bottom tabs ────────────────────────────────────
     ShellRoute(
       navigatorKey: _shellNavigatorKey,
