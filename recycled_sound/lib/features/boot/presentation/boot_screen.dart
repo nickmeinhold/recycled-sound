@@ -31,6 +31,7 @@ class _BootScreenState extends State<BootScreen> {
   Timer? _advance;
   Timer? _refresh;
   int _revealed = 0;
+  bool _telemetryError = false;
   BootstrapStatus _bootstrap = const BootstrapPending();
 
   @override
@@ -54,17 +55,25 @@ class _BootScreenState extends State<BootScreen> {
       if (!mounted) return;
       setState(() => _telemetry = t);
       _staggerReveal(t.asReadout().length);
-    } catch (_) {
-      // Telemetry failure shouldn't strand the user on the boot screen.
-      _go();
-      return;
+    } catch (e, s) {
+      // Same chord as Firebase: telemetry failure must be visible state, not
+      // a fast-navigate that skips the bootstrap gate. Keep the screen
+      // mounted, render the degraded state ("sensors unavailable"), and let
+      // the normal _tryGo path advance after the hold elapses AND the
+      // bootstrap resolves.
+      debugPrint('Telemetry snapshot failed at boot: $e\n$s');
+      if (!mounted) return;
+      setState(() => _telemetryError = true);
     }
     _refresh = Timer.periodic(const Duration(seconds: 2), (_) async {
       try {
         final t = await _service.snapshot();
         if (!mounted) return;
-        setState(() => _telemetry = t);
-      } catch (_) {/* ignore */}
+        setState(() {
+          _telemetry = t;
+          _telemetryError = false;
+        });
+      } catch (_) {/* ignore — keep last good snapshot */}
     });
     _advance = Timer(_holdDuration, _tryGo);
   }
@@ -177,15 +186,25 @@ class _BootScreenState extends State<BootScreen> {
 
   Widget _buildSpecs(DeviceTelemetry? t) {
     if (t == null) {
-      return const Center(
-        child: SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation(Color(0xFF6B7280)),
-          ),
-        ),
+      return Center(
+        child: _telemetryError
+            ? const Text(
+                'sensors unavailable',
+                style: TextStyle(
+                  fontFamily: 'Menlo',
+                  fontSize: 11,
+                  color: Color(0xFFEF4444),
+                  letterSpacing: 1.2,
+                ),
+              )
+            : const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Color(0xFF6B7280)),
+                ),
+              ),
       );
     }
     final entries = t.asReadout();

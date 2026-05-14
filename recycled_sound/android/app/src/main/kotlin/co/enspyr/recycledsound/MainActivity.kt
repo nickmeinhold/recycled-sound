@@ -72,7 +72,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /** Predictive headroom — API 30+. Null where unsupported. */
+    /**
+     * Returns Android's thermal headroom *ratio* (dimensionless float;
+     * 1.0 is the severe-throttling threshold). `forecastSeconds=0` asks
+     * for the current ratio. NOT seconds; the parameter is seconds, the
+     * return is a ratio. Null on API < 30, NaN, or unsupported.
+     */
     private fun thermalHeadroom(pm: PowerManager): Double? {
         if (Build.VERSION.SDK_INT < 30) return null
         val v = pm.getThermalHeadroom(0)

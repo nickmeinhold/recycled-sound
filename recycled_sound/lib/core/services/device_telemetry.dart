@@ -134,7 +134,10 @@ class DeviceTelemetry {
   /// 0.0–1.0. Fades the gauge across green→orange→red.
   final double thermalLoad;
 
-  /// Android-only predictive headroom (seconds), null on iOS / older Android.
+  /// Android-only thermal headroom *ratio* (not seconds): a dimensionless
+  /// float where `1.0` is the severe-throttling threshold and `0.0` is cool.
+  /// `getThermalHeadroom(forecastSeconds)` takes seconds as INPUT but returns
+  /// a ratio. Null on iOS / Android < 30 / when the OEM hasn't implemented it.
   final double? thermalHeadroom;
 
   final bool hasLidar;
