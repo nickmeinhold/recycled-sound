@@ -19,9 +19,13 @@ final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 /// App-wide router using go_router with a ShellRoute for bottom tab navigation.
-final appRouter = GoRouter(
+///
+/// [initialLocation] defaults to `/boot` (the diagnostic splash). Widget tests
+/// override to `/` to land directly on Home and avoid the boot screen's
+/// periodic timers — `pumpAndSettle` would otherwise loop until timeout.
+GoRouter createAppRouter({String initialLocation = '/boot'}) => GoRouter(
   navigatorKey: _rootNavigatorKey,
-  initialLocation: '/boot',
+  initialLocation: initialLocation,
   routes: [
     // ── Boot / diagnostic splash ───────────────────────────────────────
     GoRoute(
@@ -101,6 +105,10 @@ final appRouter = GoRouter(
     ),
   ],
 );
+
+/// Default production router — lazily constructed on first use so test code
+/// importing this file doesn't pay the boot-route construction cost.
+final appRouter = createAppRouter();
 
 /// Scaffold wrapper that provides the persistent bottom navigation bar.
 class _ScaffoldWithNavBar extends StatelessWidget {
