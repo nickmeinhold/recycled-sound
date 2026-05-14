@@ -8,6 +8,7 @@ import UIKit
   // get deallocated as soon as the registration method returns — same GC
   // hazard documented in feedback_native_plugin_gc.md.
   private var visionOcrPlugin: VisionOcrPlugin?
+  private var deviceTelemetryPlugin: DeviceTelemetryPlugin?
 
   override func application(
     _ application: UIApplication,
@@ -33,6 +34,11 @@ import UIKit
     // Register native iOS Vision OCR plugin.
     if let visionRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "VisionOcr") {
       visionOcrPlugin = VisionOcrPlugin(messenger: visionRegistrar.messenger())
+    }
+
+    // Register device telemetry channel (thermal, low-power, RAM, LiDAR, NE).
+    if let telemRegistrar = engineBridge.pluginRegistry.registrar(forPlugin: "DeviceTelemetry") {
+      deviceTelemetryPlugin = DeviceTelemetryPlugin(messenger: telemRegistrar.messenger())
     }
   }
 }

@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/firebase_providers.dart';
+import '../../../core/services/device_telemetry.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/widgets/diagnostic_readout.dart';
+import '../../../core/widgets/thermal_gauge.dart';
 import '../providers/scanner_providers.dart';
 
 /// Analysing screen (Screen 1C) — animated progress during real scan pipeline.
@@ -29,6 +32,10 @@ class _AnalysingScreenState extends ConsumerState<AnalysingScreen>
   int _stepIndex = 0;
   String? _error;
 
+  final _telemetryService = DeviceTelemetryService();
+  DeviceTelemetry? _telemetry;
+  Timer? _thermalTicker;
+
   static const _steps = [
     'Uploading image…',
     'Detecting hearing aid…',
@@ -44,6 +51,22 @@ class _AnalysingScreenState extends ConsumerState<AnalysingScreen>
       duration: const Duration(seconds: 2),
     )..repeat();
     _startScan();
+    _refreshTelemetry();
+    // Re-poll thermal/battery every 2s while the loading screen is visible.
+    _thermalTicker = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _refreshTelemetry(),
+    );
+  }
+
+  Future<void> _refreshTelemetry() async {
+    try {
+      final t = await _telemetryService.snapshot();
+      if (!mounted) return;
+      setState(() => _telemetry = t);
+    } catch (_) {
+      // Telemetry is decorative — never block the scan on it.
+    }
   }
 
   Future<void> _startScan() async {
@@ -79,6 +102,10 @@ class _AnalysingScreenState extends ConsumerState<AnalysingScreen>
       context.pushReplacement('/scan/confirm');
     } catch (e) {
       if (!mounted) return;
+      // Stop the telemetry ticker once we're in error state — the screen is
+      // quiescent post-error and there's no reason to keep polling.
+      _thermalTicker?.cancel();
+      _thermalTicker = null;
       setState(() => _error = e.toString());
     }
   }
@@ -88,11 +115,16 @@ class _AnalysingScreenState extends ConsumerState<AnalysingScreen>
       _error = null;
       _stepIndex = 0;
     });
+    _thermalTicker ??= Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _refreshTelemetry(),
+    );
     _startScan();
   }
 
   @override
   void dispose() {
+    _thermalTicker?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -140,6 +172,20 @@ class _AnalysingScreenState extends ConsumerState<AnalysingScreen>
         const SizedBox(height: 32),
         Text('Analysing…', style: AppTypography.h2),
         const SizedBox(height: 24),
+
+        // Diagnostic readout (auto-cycling device facts) + thermal gauge.
+        if (_telemetry != null) ...[
+          DiagnosticReadout(entries: _telemetry!.asReadout()),
+          const SizedBox(height: 16),
+          ThermalGauge(
+            load: _telemetry!.thermalLoad,
+            label: 'THERMAL LOAD',
+            subLabel:
+                '${_telemetry!.thermalState.label} · ${_telemetry!.thermalState.estimatedCelsiusBand}',
+            coolDownNeeded: _telemetry!.thermalState.coolDownNeeded,
+          ),
+          const SizedBox(height: 24),
+        ],
 
         // Step indicators
         ...List.generate(_steps.length, (i) {

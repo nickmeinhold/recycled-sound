@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:recycled_sound/app.dart';
+import 'package:recycled_sound/core/routing/app_router.dart';
 import 'package:recycled_sound/core/widgets/rs_button.dart';
 import 'package:recycled_sound/core/widgets/rs_card.dart';
 import 'package:recycled_sound/core/widgets/rs_chip.dart';
@@ -10,11 +11,15 @@ import 'package:recycled_sound/core/widgets/rs_progress_dots.dart';
 import 'package:recycled_sound/core/widgets/rs_spec_row.dart';
 
 void main() {
+  // Tests skip the diagnostic boot screen — its periodic timers would loop
+  // pumpAndSettle until timeout. Production keeps `/boot` as initial route.
+  Widget testApp() => ProviderScope(
+        child: RecycledSoundApp(router: createAppRouter(initialLocation: '/')),
+      );
+
   // ── App smoke test ─────────────────────────────────────────────────────
   testWidgets('Home screen renders with scanner CTA', (tester) async {
-    await tester.pumpWidget(
-      const ProviderScope(child: RecycledSoundApp()),
-    );
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Scan a Hearing Aid'), findsOneWidget);
@@ -24,9 +29,7 @@ void main() {
   });
 
   testWidgets('Home screen shows stats cards', (tester) async {
-    await tester.pumpWidget(
-      const ProviderScope(child: RecycledSoundApp()),
-    );
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
     expect(find.text('20'), findsOneWidget);
@@ -36,9 +39,7 @@ void main() {
   });
 
   testWidgets('Bottom nav bar shows Home and Devices tabs', (tester) async {
-    await tester.pumpWidget(
-      const ProviderScope(child: RecycledSoundApp()),
-    );
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
     expect(find.text('Home'), findsOneWidget);
@@ -46,9 +47,7 @@ void main() {
   });
 
   testWidgets('Navigating to Devices tab shows register', (tester) async {
-    await tester.pumpWidget(
-      const ProviderScope(child: RecycledSoundApp()),
-    );
+    await tester.pumpWidget(testApp());
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Devices'));
