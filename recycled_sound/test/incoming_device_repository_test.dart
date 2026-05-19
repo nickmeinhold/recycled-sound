@@ -52,29 +52,48 @@ void main() {
     });
   });
 
-  group('watchIncoming', () {
-    test('emits ordered list newest first', () async {
-      // Seed two docs with different createdAt values
+  group('watchMyIncoming', () {
+    test('emits creator-filtered list newest first', () async {
+      // Two docs by the current user, one by someone else. The someone-else
+      // doc must NOT appear in the stream — rule + query both enforce it.
       await firestore.collection('incoming').doc('old').set({
         'brand': 'A',
         'model': '1',
+        'createdBy': 'user-abc',
         'createdAt': DateTime.utc(2026, 1, 1),
       });
       await firestore.collection('incoming').doc('new').set({
         'brand': 'B',
         'model': '2',
+        'createdBy': 'user-abc',
         'createdAt': DateTime.utc(2026, 6, 1),
       });
+      await firestore.collection('incoming').doc('other').set({
+        'brand': 'C',
+        'model': '3',
+        'createdBy': 'someone-else',
+        'createdAt': DateTime.utc(2026, 3, 1),
+      });
 
-      final list = await repo.watchIncoming().first;
+      final list = await repo.watchMyIncoming().first;
       expect(list, hasLength(2));
       expect(list.first.id, 'new');
       expect(list.last.id, 'old');
     });
 
-    test('emits empty list when collection is empty', () async {
-      final list = await repo.watchIncoming().first;
+    test('emits empty list when collection has nothing for this user',
+        () async {
+      final list = await repo.watchMyIncoming().first;
       expect(list, isEmpty);
+    });
+
+    test('emits empty stream when no signed-in user', () async {
+      final unauth = IncomingDeviceRepository(
+        firestore: firestore,
+        storage: storage,
+        auth: MockFirebaseAuth(signedIn: false),
+      );
+      expect(unauth.watchMyIncoming(), emitsDone);
     });
   });
 

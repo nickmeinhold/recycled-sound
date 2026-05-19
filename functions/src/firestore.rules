@@ -28,21 +28,45 @@ service cloud.firestore {
     }
 
     // Incoming: scanner write-target. Any authed user can create (intake
-    // volunteers, donors). Creator can read/update their own draft;
-    // audiologists/admins can read all and promote into devices/ via triage.
+    // volunteers, donors). Creator can read/update their own draft within a
+    // field allow-list; audiologists/admins can read all and update freely
+    // (they own the triage step that promotes into devices/).
     match /incoming/{incomingId} {
-      allow read: if request.auth != null && (
-        resource.data.createdBy == request.auth.uid ||
-        request.auth.token.role in ['audiologist', 'admin']
-      );
+      // Field allow-list for non-role creator updates. Triage fields
+      // (qaStatus, status, servicingCost, servicingNotes) are NOT in this
+      // list — only audiologists/admins can set them.
+      function creatorEditableFields() {
+        return [
+          'brand', 'model', 'type', 'year', 'serialLeft', 'serialRight',
+          'batterySize', 'domeType', 'waxFilter', 'receiver',
+          'programmingInterface', 'techLevel', 'gainRange', 'fittingRange',
+          'remoteFT', 'appCompatible', 'auracast', 'chargerType',
+          'accessories', 'condition', 'donorId', 'scanId', 'photos',
+          'updatedAt'
+        ];
+      }
+      function isCreator() {
+        return resource.data.createdBy == request.auth.uid;
+      }
+      function isElevated() {
+        return request.auth.token.role in ['audiologist', 'admin'];
+      }
+      function onlyAllowedFieldsChanged() {
+        return request.resource.data.diff(resource.data)
+          .affectedKeys().hasOnly(creatorEditableFields());
+      }
+      function createdByUnchanged() {
+        return request.resource.data.createdBy == resource.data.createdBy;
+      }
+
+      allow read: if request.auth != null && (isCreator() || isElevated());
       allow create: if request.auth != null &&
         request.resource.data.createdBy == request.auth.uid;
       allow update: if request.auth != null && (
-        resource.data.createdBy == request.auth.uid ||
-        request.auth.token.role in ['audiologist', 'admin']
+        isElevated() ||
+        (isCreator() && createdByUnchanged() && onlyAllowedFieldsChanged())
       );
-      allow delete: if request.auth != null &&
-        request.auth.token.role in ['audiologist', 'admin'];
+      allow delete: if request.auth != null && isElevated();
     }
 
     // Devices: post-triage register. Anyone authed can read; only

@@ -24,8 +24,8 @@ void main() {
       type: 'RIC',
       year: '2021',
       batterySize: '312',
-      qaStatus: 'passed',
-      status: 'ready',
+      qaStatus: QaStatus.passed,
+      status: DeviceStatus.ready,
     );
 
     await tester.pumpWidget(_wrap(

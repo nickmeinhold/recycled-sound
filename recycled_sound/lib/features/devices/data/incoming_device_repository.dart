@@ -90,14 +90,22 @@ class IncomingDeviceRepository {
     return id;
   }
 
-  /// Stream of all incoming records, newest first.
+  /// Stream of incoming records created by the current user, newest first.
   ///
-  /// Security rules limit visibility: regular users see only what they
-  /// created; audiologists/admins see everything.
-  Stream<List<Device>> watchIncoming() => _col
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map((q) => q.docs.map(Device.fromFirestore).toList());
+  /// The `.where('createdBy', isEqualTo: uid)` clause is REQUIRED — Firestore
+  /// rules are not post-filters. A non-admin query without this predicate is
+  /// rejected at the rules layer even for documents the user is allowed to
+  /// read individually. Audiologist/admin "review queue" queries belong in a
+  /// separate method that is gated on role-aware paths.
+  Stream<List<Device>> watchMyIncoming() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+    return _col
+        .where('createdBy', isEqualTo: uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((q) => q.docs.map(Device.fromFirestore).toList());
+  }
 
   /// Stream of a single incoming record. Emits `null` if the doc doesn't
   /// exist (e.g. promoted into `devices/` and deleted, or never written).

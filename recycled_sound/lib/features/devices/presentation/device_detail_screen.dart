@@ -44,10 +44,10 @@ class _DetailView extends StatelessWidget {
 
   final Device device;
 
-  RsChipVariant _qaVariant(String status) => switch (status) {
-        'passed' => RsChipVariant.success,
-        'failed' => RsChipVariant.error,
-        _ => RsChipVariant.warning,
+  RsChipVariant _qaVariant(QaStatus status) => switch (status) {
+        QaStatus.passed => RsChipVariant.success,
+        QaStatus.failed => RsChipVariant.error,
+        QaStatus.pendingQa => RsChipVariant.warning,
       };
 
   @override
@@ -57,7 +57,7 @@ class _DetailView extends StatelessWidget {
         title: Text('${device.brand} ${device.model}'),
         actions: [
           RsChip(
-            label: device.qaStatus.replaceAll('_', ' ').toUpperCase(),
+            label: device.qaStatus.wire.replaceAll('_', ' ').toUpperCase(),
             variant: _qaVariant(device.qaStatus),
           ),
           const SizedBox(width: 16),
@@ -102,8 +102,8 @@ class _DetailView extends StatelessWidget {
             RsCard(
               child: Column(
                 children: [
-                  RsSpecRow(label: 'QA', value: device.qaStatus),
-                  RsSpecRow(label: 'Status', value: device.status),
+                  RsSpecRow(label: 'QA', value: device.qaStatus.wire),
+                  RsSpecRow(label: 'Status', value: device.status.wire),
                   RsSpecRow(label: 'Condition', value: device.condition),
                 ],
               ),

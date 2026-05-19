@@ -11,18 +11,36 @@ service firebase.storage {
     }
 
     // Incoming device photos: scanner writes here after Confirm.
-    // Any authed user can read (audiologists triage); creator writes.
+    // The Firestore doc's createdBy gates write access — only the creator
+    // (or an audiologist/admin) may upload to a given incoming/{id}/photos/
+    // path. Cross-tenant photo overwrites would otherwise be possible since
+    // the path itself carries no uid.
     match /incoming/{incomingId}/photos/{photoId} {
+      function incomingDoc() {
+        return firestore.get(
+          /databases/(default)/documents/incoming/$(incomingId)
+        );
+      }
+      function isElevated() {
+        return request.auth.token.role in ['audiologist', 'admin'];
+      }
+
       allow read: if request.auth != null;
       allow write: if request.auth != null
         && request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+        && request.resource.contentType.matches('image/.*')
+        && (
+          incomingDoc().data.createdBy == request.auth.uid
+          || isElevated()
+        );
     }
 
-    // Device register photos: post-triage, audiologist-curated.
+    // Device register photos: post-triage, audiologist-curated. Only
+    // audiologists/admins may write — mirrors the Firestore devices/ rule.
     match /devices/{deviceId}/photos/{photoId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null
+        && request.auth.token.role in ['audiologist', 'admin']
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }

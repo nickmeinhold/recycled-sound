@@ -1,18 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/firebase_providers.dart';
 import '../data/incoming_device_repository.dart';
 import '../data/models/device.dart';
-
-/// Firebase service singletons. Overridable in tests via ProviderScope.
-final firestoreProvider =
-    Provider<FirebaseFirestore>((_) => FirebaseFirestore.instance);
-final firebaseStorageProvider =
-    Provider<FirebaseStorage>((_) => FirebaseStorage.instance);
-final firebaseAuthProvider =
-    Provider<FirebaseAuth>((_) => FirebaseAuth.instance);
 
 /// The incoming-device repository — scanner writes, list/detail reads.
 final incomingDeviceRepositoryProvider = Provider<IncomingDeviceRepository>((
@@ -25,9 +15,12 @@ final incomingDeviceRepositoryProvider = Provider<IncomingDeviceRepository>((
   );
 });
 
-/// Live stream of all incoming records visible to the current user.
+/// Live stream of incoming records visible to the current user (own only).
+///
+/// Audiologists/admins should use a separate query for triage review — see
+/// future `incomingForReviewProvider`.
 final incomingDevicesStreamProvider = StreamProvider<List<Device>>((ref) {
-  return ref.watch(incomingDeviceRepositoryProvider).watchIncoming();
+  return ref.watch(incomingDeviceRepositoryProvider).watchMyIncoming();
 });
 
 /// Live stream of a single incoming record by id.

@@ -78,10 +78,10 @@ class _DeviceCard extends StatelessWidget {
   final Device device;
   final VoidCallback onTap;
 
-  RsChipVariant _qaVariant(String status) => switch (status) {
-        'passed' => RsChipVariant.success,
-        'failed' => RsChipVariant.error,
-        _ => RsChipVariant.warning,
+  RsChipVariant _qaVariant(QaStatus status) => switch (status) {
+        QaStatus.passed => RsChipVariant.success,
+        QaStatus.failed => RsChipVariant.error,
+        QaStatus.pendingQa => RsChipVariant.warning,
       };
 
   @override
@@ -125,7 +125,7 @@ class _DeviceCard extends StatelessWidget {
               ),
             ),
             RsChip(
-              label: device.qaStatus.replaceAll('_', ' ').toUpperCase(),
+              label: device.qaStatus.wire.replaceAll('_', ' ').toUpperCase(),
               variant: _qaVariant(device.qaStatus),
             ),
           ],

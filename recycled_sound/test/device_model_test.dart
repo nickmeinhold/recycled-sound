@@ -77,8 +77,8 @@ void main() {
       expect(d.remoteFT, isFalse);
       expect(d.accessories, isEmpty);
       expect(d.photos, isEmpty);
-      expect(d.qaStatus, 'pending_qa');
-      expect(d.status, 'donated');
+      expect(d.qaStatus, QaStatus.pendingQa);
+      expect(d.status, DeviceStatus.donated);
       expect(d.servicingCost, 0);
       expect(d.createdAt, isNull);
       expect(d.updatedAt, isNull);
@@ -104,7 +104,7 @@ void main() {
         type: 'BTE',
         batterySize: '13',
       );
-      final map = d.toFirestore();
+      final map = d.toFirestore(createdBy: 'user-1');
 
       expect(map['brand'], 'Oticon');
       expect(map['model'], 'More 1');
@@ -112,17 +112,17 @@ void main() {
       expect(map['batterySize'], '13');
       expect(map['accessories'], isEmpty);
       expect(map['photos'], isEmpty);
-      // Default qaStatus / status preserved
+      // Enums serialized to their wire form
       expect(map['qaStatus'], 'pending_qa');
       expect(map['status'], 'donated');
       // Server sentinels for fresh writes
       expect(map['createdAt'], isA<FieldValue>());
       expect(map['updatedAt'], isA<FieldValue>());
-      // createdBy omitted when null
-      expect(map.containsKey('createdBy'), isFalse);
+      // createdBy required and present
+      expect(map['createdBy'], 'user-1');
     });
 
-    test('createdBy included when provided', () {
+    test('createdBy threads through to the payload', () {
       const d = Device(id: 'x', brand: 'Phonak', model: 'P90');
       final map = d.toFirestore(createdBy: 'user-123');
       expect(map['createdBy'], 'user-123');
@@ -136,12 +136,38 @@ void main() {
         model: 'M',
         createdAt: created,
       );
-      final map = d.toFirestore();
+      final map = d.toFirestore(createdBy: 'user-1');
       expect(map['createdAt'], isA<Timestamp>());
       expect(
         (map['createdAt'] as Timestamp).toDate().toUtc(),
         created,
       );
+    });
+
+    test('non-default qaStatus and status round-trip via enum', () {
+      const d = Device(
+        id: 'x',
+        brand: 'B',
+        model: 'M',
+        qaStatus: QaStatus.passed,
+        status: DeviceStatus.matched,
+      );
+      final map = d.toFirestore(createdBy: 'user-1');
+      expect(map['qaStatus'], 'passed');
+      expect(map['status'], 'matched');
+    });
+
+    test('QaStatus.fromWire treats unknown values as pendingQa', () {
+      expect(QaStatus.fromWire('passed'), QaStatus.passed);
+      expect(QaStatus.fromWire('failed'), QaStatus.failed);
+      expect(QaStatus.fromWire(null), QaStatus.pendingQa);
+      expect(QaStatus.fromWire('mystery_state'), QaStatus.pendingQa);
+    });
+
+    test('DeviceStatus.fromWire treats unknown values as donated', () {
+      expect(DeviceStatus.fromWire('ready'), DeviceStatus.ready);
+      expect(DeviceStatus.fromWire(null), DeviceStatus.donated);
+      expect(DeviceStatus.fromWire('unknown_state'), DeviceStatus.donated);
     });
   });
 
