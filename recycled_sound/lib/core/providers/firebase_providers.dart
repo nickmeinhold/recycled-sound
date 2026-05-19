@@ -1,3 +1,5 @@
+// Excluded from coverage: Firebase service-singleton providers; trivial wiring
+// coverage:ignore-file
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';

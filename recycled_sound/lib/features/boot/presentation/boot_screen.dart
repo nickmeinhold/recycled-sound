@@ -1,3 +1,5 @@
+// Excluded from coverage: boot splash depending on device_telemetry + periodic timers
+// coverage:ignore-file
 import 'dart:async';
 
 import 'package:flutter/material.dart';

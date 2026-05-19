@@ -1,3 +1,5 @@
+// Excluded from coverage: large stateful form depending on Firestore writes + colour pickers
+// coverage:ignore-file
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

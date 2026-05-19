@@ -41,6 +41,9 @@ dev_dependencies:
   freezed: ^2.5.8
   json_serializable: ^6.9.4
   riverpod_generator: ^2.6.3
+  fake_cloud_firestore: ^3.0.0
+  firebase_storage_mocks: ^0.7.0
+  firebase_auth_mocks: ^0.14.0
 
 flutter:
   uses-material-design: true
